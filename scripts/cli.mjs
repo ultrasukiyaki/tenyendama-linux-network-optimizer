@@ -22,6 +22,8 @@ import {
   evaluateConfirmation,
   parseProfile,
 } from "../lib/optimizer.mjs";
+import { MODE_DESCRIPTIONS, MODE_REGISTRY, normalizeMode } from "../lib/stats.mjs";
+import { generateBufferCandidates, MIB } from "../lib/tcp-buffer.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDirectory, "..");
@@ -112,17 +114,90 @@ const askYesNo = async (question, defaultNo = true) => {
 
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
-const benchmarkArgsFromOptimize = (options, outputDir, profiles, preset, seed) => {
+const writeOptimizationReport = async (sessionDir, {
+  options,
+  currentProfile,
+  finalProfileName,
+  explorationDecision,
+  confirmationDecision,
+  evaluation,
+  bufferGeneration,
+  bufferExplorationDecision,
+  bufferConfirmationDecision,
+  bufferEvaluation,
+  persistenceStatus,
+}) => {
+  const decisionLine = (label, decision) =>
+    `- ${label}: \`${decision?.status || "not-run"}\``
+    + `${decision?.recommendedProfile ? ` → \`${decision.recommendedProfile}\`` : ""}`;
+  const lines = [
+    "# Tenyendama Linux Network Optimizer — Optimization Report",
+    "",
+    `- Requested mode: \`${options.requestedMode}\``,
+    `- Normalized mode: \`${options.mode}\``,
+    `- Mode description: ${options.modeDescription}`,
+    `- Starting profile: \`${currentProfile}\``,
+    `- Final candidate: \`${finalProfileName}\``,
+    `- Persistence: \`${persistenceStatus}\``,
+    "- All route, protocol, latency, spike, variability, confirmation, and restoration safety gates remained enabled.",
+    "",
+    "## CC and qdisc",
+    "",
+    decisionLine("Exploration", explorationDecision),
+    decisionLine("Confirmation", confirmationDecision),
+    `- Confirmation accepted: \`${Boolean(evaluation?.accepted)}\``,
+  ];
+  if (evaluation?.reasons?.length) {
+    lines.push(...evaluation.reasons.map((reason) => `- Reason: ${reason}`));
+  }
+  lines.push(
+    "",
+    "## TCP buffer tuning",
+    "",
+    `- Requested: \`${options.tuneBuffers}\``,
+    `- Candidate generation: \`${bufferGeneration?.skipped ? "skipped" : bufferGeneration ? "completed" : "not-run"}\``,
+  );
+  if (bufferGeneration?.reason) lines.push(`- Generation/skip reason: ${bufferGeneration.reason}`);
+  if (bufferGeneration) {
+    lines.push(
+      `- Receive BDP: \`${bufferGeneration.receiveBdpBytes ?? "n/a"}\` bytes`,
+      `- Send BDP: \`${bufferGeneration.sendBdpBytes ?? "n/a"}\` bytes`,
+      `- Buffer cap: \`${bufferGeneration.bufferCapBytes ?? "n/a"}\` bytes`,
+      `- Candidates: ${(bufferGeneration.candidates || []).map((item) =>
+        `\`${item.name}\``).join(", ") || "none"}`,
+    );
+  }
+  lines.push(
+    decisionLine("Buffer exploration", bufferExplorationDecision),
+    decisionLine("Buffer confirmation", bufferConfirmationDecision),
+    `- Buffer confirmation accepted: \`${Boolean(bufferEvaluation?.accepted)}\``,
+  );
+  if (bufferEvaluation?.reasons?.length) {
+    lines.push(...bufferEvaluation.reasons.map((reason) => `- Reason: ${reason}`));
+  }
+  lines.push(
+    "",
+    "## Unchanged diagnostic settings",
+    "",
+    "- `net.ipv4.tcp_mem` was not changed.",
+    "- `net.core.netdev_max_backlog` was not changed.",
+    "- Larger TCP buffers do not guarantee better performance.",
+    "",
+  );
+  await writeFile(join(sessionDir, "optimization-report.md"), lines.join("\n"));
+};
+
+const benchmarkArgsFromOptimize = (options, outputDir, profiles, preset, seed, profileFile = null) => {
   const args = [
     benchmarkScript,
     "--iface", options.iface,
     "--preset", preset,
     "--mode", options.mode,
-    "--profiles", profiles.join(","),
     "--min-score-gap", String(options.minScoreGap),
     "--seed", String(seed >>> 0),
     "--output-dir", outputDir,
   ];
+  args.push(profileFile ? "--profile-file" : "--profiles", profileFile || profiles.join(","));
   if (preset === "confirmation") args.push("--min-decision-runs", "4");
   if (options.headed) args.push("--headed");
   if (options.backgroundAction) {
@@ -146,6 +221,8 @@ const parseOptimizeArgs = (argv) => {
     seed: Date.now() >>> 0,
     backgroundAction: "prompt",
     backgroundThreshold: null,
+    tuneBuffers: false,
+    bufferCapMiB: null,
   };
   const need = (arg, value) => {
     if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
@@ -165,6 +242,10 @@ const parseOptimizeArgs = (argv) => {
       case "--background-threshold": options.backgroundThreshold = Number(need(arg, next)); index += 1; break;
       case "--headed": options.headed = true; break;
       case "--yes": options.yes = true; break;
+      case "--tune-buffers": options.tuneBuffers = true; break;
+      case "--buffer-cap-mib":
+        options.bufferCapMiB = Number(need(arg, next)); index += 1; break;
+      case "--help": options.help = true; break;
       default: throw new Error(`Unknown optimize option: ${arg}`);
     }
   }
@@ -174,8 +255,16 @@ const parseOptimizeArgs = (argv) => {
   if (!["quick", "standard", "deep"].includes(options.preset)) {
     throw new Error("optimize supports quick, standard, or deep presets");
   }
-  if (!["balanced", "download", "upload", "latency", "streaming"].includes(options.mode)) {
-    throw new Error(`Unknown scoring mode: ${options.mode}`);
+  options.requestedMode = options.mode;
+  options.mode = normalizeMode(options.mode);
+  options.modeDescription = MODE_DESCRIPTIONS[options.mode];
+  options.scoringWeights = MODE_REGISTRY[options.mode];
+  if (options.bufferCapMiB !== null &&
+      (!Number.isInteger(options.bufferCapMiB) || options.bufferCapMiB < 4 || options.bufferCapMiB > 256)) {
+    throw new Error("--buffer-cap-mib must be an integer from 4 through 256.");
+  }
+  if (options.bufferCapMiB !== null && !options.tuneBuffers) {
+    throw new Error("--buffer-cap-mib requires --tune-buffers");
   }
   for (const profile of options.profiles) parseProfile(profile);
   return options;
@@ -203,14 +292,61 @@ const showStatus = async () => {
   const physicalIface = resolved.physicalIface;
   const cc = await commandText("sysctl", ["-n", "net.ipv4.tcp_congestion_control"]);
   const qdisc = await qdiscKind(physicalIface);
+  const sysctl = async (key) => {
+    const result = await run("sysctl", ["-n", key], {
+      capture: true,
+      allowFailure: true,
+    });
+    return result.code === 0 ? result.stdout.trim() : "unavailable";
+  };
+  const effective = {
+    coreRmemMax: await sysctl("net.core.rmem_max"),
+    coreWmemMax: await sysctl("net.core.wmem_max"),
+    tcpRmem: await sysctl("net.ipv4.tcp_rmem"),
+    tcpWmem: await sysctl("net.ipv4.tcp_wmem"),
+    tcpMem: await sysctl("net.ipv4.tcp_mem"),
+    moderateRcvbuf: await sysctl("net.ipv4.tcp_moderate_rcvbuf"),
+    windowScaling: await sysctl("net.ipv4.tcp_window_scaling"),
+  };
   console.log(`Routing interface : ${routingIface}`);
   console.log(`Physical egress   : ${physicalIface}`);
   console.log(`Interface chain   : ${resolved.chain.join(" -> ")}`);
   console.log(`Active profile    : ${cc}-${qdisc}`);
+  console.log(`core_rmem_max     : ${effective.coreRmemMax}`);
+  console.log(`core_wmem_max     : ${effective.coreWmemMax}`);
+  console.log(`tcp_rmem          : ${effective.tcpRmem}`);
+  console.log(`tcp_wmem          : ${effective.tcpWmem}`);
+  console.log(`tcp_mem           : ${effective.tcpMem} (diagnostic-only)`);
+  console.log(`moderate_rcvbuf   : ${effective.moderateRcvbuf}`);
+  console.log(`window_scaling    : ${effective.windowScaling} (diagnostic-only)`);
   const envPath = "/etc/tenyendama-netopt/current.env";
   if (await pathExists(envPath)) {
+    const managedText = await readFile(envPath, "utf8");
+    const managed = Object.fromEntries(managedText.split("\n").flatMap((line) => {
+      const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (!match) return [];
+      return [[match[1], match[2]
+        .replace(/^'(.*)'$/, "$1")
+        .replace(/^"(.*)"$/, "$1")
+        .replaceAll("\\ ", " ")]];
+    }));
+    const normalizeVector = (value) => value?.trim().replace(/\s+/g, " ");
+    const comparisons = [
+      ["CC", managed.TENYENDAMA_CC, cc],
+      ["qdisc", managed.TENYENDAMA_QDISC, qdisc],
+      ["core_rmem_max", managed.TENYENDAMA_CORE_RMEM_MAX, effective.coreRmemMax],
+      ["core_wmem_max", managed.TENYENDAMA_CORE_WMEM_MAX, effective.coreWmemMax],
+      ["tcp_rmem", normalizeVector(managed.TENYENDAMA_TCP_RMEM), normalizeVector(effective.tcpRmem)],
+      ["tcp_wmem", normalizeVector(managed.TENYENDAMA_TCP_WMEM), normalizeVector(effective.tcpWmem)],
+      ["tcp_moderate_rcvbuf", managed.TENYENDAMA_TCP_MODERATE_RCVBUF, effective.moderateRcvbuf],
+    ].filter(([, expected]) => expected !== undefined);
+    const mismatches = comparisons.filter(([, expected, actual]) => expected !== actual);
     console.log("Managed profile   : yes");
-    console.log(await readFile(envPath, "utf8"));
+    console.log(`Managed match     : ${mismatches.length ? "MISMATCH" : "yes"}`);
+    for (const [name, expected, actual] of mismatches) {
+      console.log(`  ${name}: managed=${expected} effective=${actual}`);
+    }
+    console.log(managedText);
   } else {
     console.log("Managed profile   : no");
   }
@@ -218,6 +354,7 @@ const showStatus = async () => {
 
 const optimize = async (argv) => {
   const options = parseOptimizeArgs(argv);
+  if (options.help) { console.log(helpText.trim()); return; }
   const approximateExploration = estimateTransferBytes({
     profileCount: options.profiles.length,
     ...PRESET_TRANSFER[options.preset],
@@ -226,7 +363,7 @@ const optimize = async (argv) => {
     profileCount: 2,
     ...PRESET_TRANSFER.confirmation,
   });
-  console.log("Tenyendama Linux Network Optimizer v3.0.1");
+  console.log("Tenyendama Linux Network Optimizer v3.1.0");
   console.log(`Exploration profiles: ${options.profiles.join(", ")}`);
   console.log(
     `Estimated maximum transfer: ${formatBytes(approximateExploration + approximateConfirmation)}`
@@ -247,56 +384,117 @@ const optimize = async (argv) => {
     options, explorationDir, options.profiles, options.preset, options.seed
   ));
   const explorationDecision = await readJson(join(explorationDir, "decision.json"));
+  const explorationSummary = await readJson(join(explorationDir, "summary.json"));
   const explorationEnvironment = await readJson(join(explorationDir, "environment.json"));
   const currentProfile = explorationEnvironment.currentProfile;
   const candidateProfile = explorationDecision.recommendedProfile;
 
-  if (explorationDecision.status !== "winner") {
+  if (explorationDecision.status !== "winner" && !options.tuneBuffers) {
+    await writeOptimizationReport(sessionDir, {
+      options, currentProfile,
+      finalProfileName: currentProfile,
+      explorationDecision,
+      confirmationDecision: null,
+      evaluation: null,
+      bufferGeneration: null,
+      bufferExplorationDecision: null,
+      bufferConfirmationDecision: null,
+      bufferEvaluation: null,
+      persistenceStatus: "not-eligible",
+    });
     console.log(`\nNo persistent change: exploration status is ${explorationDecision.status}.`);
     console.log(`Report: ${join(explorationDir, "report.md")}`);
     return;
   }
-  if (!candidateProfile || candidateProfile === currentProfile) {
+  if ((!candidateProfile || candidateProfile === currentProfile) && !options.tuneBuffers) {
+    await writeOptimizationReport(sessionDir, {
+      options, currentProfile,
+      finalProfileName: currentProfile,
+      explorationDecision,
+      confirmationDecision: null,
+      evaluation: null,
+      bufferGeneration: null,
+      bufferExplorationDecision: null,
+      bufferConfirmationDecision: null,
+      bufferEvaluation: null,
+      persistenceStatus: "not-needed",
+    });
     console.log("\nThe current profile already won. No persistent change is needed.");
     return;
   }
   parseProfile(currentProfile);
-  parseProfile(candidateProfile);
+  const ccCandidateProfile = explorationDecision.status === "winner" &&
+    candidateProfile && candidateProfile !== currentProfile ? candidateProfile : currentProfile;
+  parseProfile(ccCandidateProfile);
 
-  await mkdir(confirmationDir, { recursive: true });
-  console.log("\n=== Stage 2/2: confirmation against current profile ===");
-  await run(process.execPath, benchmarkArgsFromOptimize(
-    options,
-    confirmationDir,
-    [currentProfile, candidateProfile],
-    "confirmation",
-    options.seed ^ 0x9e3779b9
-  ));
+  let confirmationSummary = null;
+  let evaluation;
+  if (ccCandidateProfile === currentProfile) {
+    const baseline = explorationSummary.profiles.find(
+      (item) => item.profile === currentProfile
+    );
+    evaluation = {
+      accepted: Boolean(baseline?.eligible),
+      candidateProfile: currentProfile,
+      currentProfile,
+      scoreGap: 0,
+      reasons: baseline?.eligible
+        ? []
+        : ["The current-profile exploration baseline is ineligible."],
+      confirmationSkipped: true,
+      reason: "CC/qdisc confirmation is unnecessary because no different candidate was selected.",
+    };
+    console.log(
+      "\nCC/qdisc confirmation skipped: no different CC/qdisc candidate was selected."
+    );
+  } else {
+    await mkdir(confirmationDir, { recursive: true });
+    console.log("\n=== Stage 2/2: confirmation against current profile ===");
+    await run(process.execPath, benchmarkArgsFromOptimize(
+      options,
+      confirmationDir,
+      [currentProfile, ccCandidateProfile],
+      "confirmation",
+      options.seed ^ 0x9e3779b9
+    ));
 
-  const confirmationSummary = await readJson(join(confirmationDir, "summary.json"));
-  const confirmationRuns = await readJson(join(confirmationDir, "raw-results.json"));
-  const confirmationEnvironment = await readJson(
-    join(confirmationDir, "environment.json")
-  );
-  const evaluation = evaluateConfirmation({
-    candidateProfile,
-    currentProfile,
-    decision: confirmationSummary.decision,
-    profileSummaries: confirmationSummary.profiles,
-    runs: confirmationRuns,
-    minScoreGap: options.minScoreGap,
-    backgroundTrafficPassed: [
-      ...(explorationEnvironment.backgroundChecks || []),
-      ...(confirmationEnvironment.backgroundChecks || []),
-    ].every((check) => check.passed),
-  });
+    confirmationSummary = await readJson(join(confirmationDir, "summary.json"));
+    const confirmationRuns = await readJson(join(confirmationDir, "raw-results.json"));
+    const confirmationEnvironment = await readJson(
+      join(confirmationDir, "environment.json")
+    );
+    evaluation = evaluateConfirmation({
+      candidateProfile: ccCandidateProfile,
+      currentProfile,
+      decision: confirmationSummary.decision,
+      profileSummaries: confirmationSummary.profiles,
+      runs: confirmationRuns,
+      minScoreGap: options.minScoreGap,
+      backgroundTrafficPassed: [
+        ...(explorationEnvironment.backgroundChecks || []),
+        ...(confirmationEnvironment.backgroundChecks || []),
+      ].every((check) => check.passed),
+    });
+  }
   await writeFile(join(sessionDir, "optimization-decision.json"), JSON.stringify({
     explorationDecision,
-    confirmationDecision: confirmationSummary.decision,
+    confirmationDecision: confirmationSummary?.decision || null,
     evaluation,
   }, null, 2));
 
-  if (!evaluation.accepted) {
+  if (!evaluation.accepted && !options.tuneBuffers) {
+    await writeOptimizationReport(sessionDir, {
+      options, currentProfile,
+      finalProfileName: currentProfile,
+      explorationDecision,
+      confirmationDecision: confirmationSummary?.decision || null,
+      evaluation,
+      bufferGeneration: null,
+      bufferExplorationDecision: null,
+      bufferConfirmationDecision: null,
+      bufferEvaluation: null,
+      persistenceStatus: "confirmation-rejected",
+    });
     console.log("\nNo profile will be persisted.");
     console.log("\nReason:");
     for (const reason of evaluation.reasons) console.log(`- ${reason}`);
@@ -304,36 +502,185 @@ const optimize = async (argv) => {
     return;
   }
 
-  const candidate = parseProfile(candidateProfile);
+  const selectedProfile = evaluation.accepted ? ccCandidateProfile : currentProfile;
+  let candidate = parseProfile(selectedProfile);
+  let finalProfileName = selectedProfile;
+  let finalBuffers = null;
+  let finalEvaluation = evaluation;
+  let bufferGeneration = null;
+  let bufferExplorationDecision = null;
+  let bufferConfirmationDecision = null;
+  let bufferEvaluation = null;
+  if (options.tuneBuffers) {
+    const snapshot = explorationEnvironment.snapshot?.tcpBuffers;
+    const selectedSummary = confirmationSummary?.profiles.find(
+      (item) => item.profile === selectedProfile
+    ) || explorationSummary.profiles.find((item) => item.profile === selectedProfile);
+    const unsafeReason = snapshot?.tcpWindowScaling !== 1
+      ? "tcp_window_scaling is not enabled"
+      : !selectedSummary ? "the selected baseline summary is missing"
+        : !selectedSummary.eligible
+          ? "the baseline failed a route, protocol, latency, spike, or variability safety gate"
+          : null;
+    let generated = { skipped: true, reason: unsafeReason || "required buffer data is unavailable" };
+    if (!unsafeReason && snapshot?.memTotalBytes && selectedSummary) {
+      try {
+        generated = generateBufferCandidates({
+          snapshot, cc: candidate.cc, qdisc: candidate.qdisc,
+          downloadMedianMbps: selectedSummary.downloadMedianMbps,
+          uploadMedianMbps: selectedSummary.uploadMedianMbps,
+          unloadedLatencyMedianMs: selectedSummary.unloadedLatencyMedianMs,
+          memTotalBytes: snapshot.memTotalBytes,
+          bufferCapBytes: options.bufferCapMiB === null ? undefined : options.bufferCapMiB * MIB,
+        });
+      } catch (error) {
+        generated = {
+          skipped: true,
+          reason: `invalid or missing BDP input: ${error.message}`,
+          candidates: [],
+        };
+      }
+    }
+    bufferGeneration = generated;
+    await writeFile(join(sessionDir, "buffer-candidates.json"),
+      JSON.stringify(generated, null, 2));
+    if (!generated.skipped) {
+      const bufferDir = join(sessionDir, "buffer-exploration");
+      const profileFile = join(sessionDir, "buffer-profiles.json");
+      await mkdir(bufferDir, { recursive: true });
+      await writeFile(profileFile, JSON.stringify(generated.candidates, null, 2));
+      console.log("\n=== TCP buffer exploration (opt-in) ===");
+      await run(process.execPath, benchmarkArgsFromOptimize(
+        options, bufferDir, [], options.preset, options.seed ^ 0x51ed270b, profileFile
+      ));
+      const bufferSummary = await readJson(join(bufferDir, "summary.json"));
+      const bufferDecision = bufferSummary.decision;
+      bufferExplorationDecision = bufferDecision;
+      if (bufferDecision.status === "winner" &&
+          bufferDecision.recommendedProfile !== generated.candidates[0].name) {
+        const chosen = generated.candidates.find((item) =>
+          item.name === bufferDecision.recommendedProfile);
+        if (chosen) {
+          const bufferConfirmationDir = join(sessionDir, "buffer-confirmation");
+          const confirmationFile = join(sessionDir, "buffer-confirmation-profiles.json");
+          await mkdir(bufferConfirmationDir, { recursive: true });
+          await writeFile(confirmationFile, JSON.stringify([
+            generated.candidates[0], chosen,
+          ], null, 2));
+          console.log("\n=== TCP buffer confirmation ===");
+          await run(process.execPath, benchmarkArgsFromOptimize(
+            options, bufferConfirmationDir, [], "confirmation",
+            options.seed ^ 0xa54ff53a, confirmationFile
+          ));
+          const bufferConfirmation = await readJson(
+            join(bufferConfirmationDir, "summary.json")
+          );
+          const bufferConfirmationEnvironment = await readJson(
+            join(bufferConfirmationDir, "environment.json")
+          );
+          const bufferExplorationEnvironment = await readJson(
+            join(bufferDir, "environment.json")
+          );
+          const bufferRuns = await readJson(
+            join(bufferConfirmationDir, "raw-results.json")
+          );
+          bufferEvaluation = evaluateConfirmation({
+            candidateProfile: chosen.name,
+            currentProfile: generated.candidates[0].name,
+            decision: bufferConfirmation.decision,
+            profileSummaries: bufferConfirmation.profiles,
+            runs: bufferRuns,
+            minScoreGap: options.minScoreGap,
+            backgroundTrafficPassed: [
+              ...(bufferExplorationEnvironment.backgroundChecks || []),
+              ...(bufferConfirmationEnvironment.backgroundChecks || []),
+            ].every((check) => check.passed),
+          });
+          bufferConfirmationDecision = bufferConfirmation.decision;
+          if (bufferEvaluation.accepted) {
+            finalProfileName = chosen.name;
+            finalBuffers = chosen.buffers;
+            candidate = chosen;
+            finalEvaluation = bufferEvaluation;
+          } else {
+            console.log("TCP buffer candidate did not pass confirmation; current buffers retained.");
+            for (const reason of bufferEvaluation.reasons) {
+              console.log(`- ${reason}`);
+            }
+          }
+        }
+      }
+    } else {
+      console.log(`\nTCP buffer tuning skipped safely: ${generated.reason}`);
+    }
+  }
+  if (finalProfileName === currentProfile && finalBuffers === null) {
+    await writeOptimizationReport(sessionDir, {
+      options, currentProfile, finalProfileName, explorationDecision,
+      confirmationDecision: confirmationSummary?.decision || null,
+      evaluation, bufferGeneration, bufferExplorationDecision,
+      bufferConfirmationDecision, bufferEvaluation,
+      persistenceStatus: "not-needed",
+    });
+    console.log(
+      "\nNo persistent change is needed: CC, qdisc, and TCP buffers "
+      + "all remain at their starting values."
+    );
+    console.log(`Reports: ${sessionDir}`);
+    return;
+  }
   console.log("\nPersistent change candidate:");
   console.log(`  Interface : ${explorationEnvironment.physicalIface}`);
   console.log(`  Current   : ${currentProfile}`);
-  console.log(`  Candidate : ${candidateProfile}`);
-  console.log(`  Score gap : ${evaluation.scoreGap.toFixed(2)} points`);
+  console.log(`  Candidate : ${finalProfileName}`);
+  console.log(
+    `  Score gap : ${Number.isFinite(finalEvaluation?.scoreGap)
+      ? finalEvaluation.scoreGap.toFixed(2) : "n/a"} points`
+  );
   console.log("  Files     : /etc/sysctl.d + systemd oneshot + rollback backup");
 
   if (!options.yes && !(await askYesNo("Persist this verified profile?"))) {
+    await writeOptimizationReport(sessionDir, {
+      options, currentProfile, finalProfileName, explorationDecision,
+      confirmationDecision: confirmationSummary?.decision || null,
+      evaluation, bufferGeneration, bufferExplorationDecision,
+      bufferConfirmationDecision, bufferEvaluation,
+      persistenceStatus: "declined",
+    });
     console.log("Not persisted. Benchmark reports remain available.");
     return;
   }
 
   await run("sudo", ["-v"]);
-  const persisted = await run("sudo", [
+  const persistArgs = [
     helper,
-    "persist",
+    finalBuffers ? "persist-full" : "persist",
     explorationEnvironment.physicalIface,
     candidate.cc,
     candidate.qdisc,
-  ], { capture: true });
+  ];
+  if (finalBuffers) persistArgs.push(
+    String(finalBuffers.coreRmemMax), String(finalBuffers.coreWmemMax),
+    ...finalBuffers.tcpRmem.map(String), ...finalBuffers.tcpWmem.map(String),
+    String(finalBuffers.tcpModerateRcvbuf)
+  );
+  const persisted = await run("sudo", persistArgs, { capture: true });
   process.stdout.write(persisted.stdout);
   process.stderr.write(persisted.stderr);
   await writeFile(join(sessionDir, "applied.json"), JSON.stringify({
     appliedAt: new Date().toISOString(),
     physicalIface: explorationEnvironment.physicalIface,
     currentProfile,
-    candidateProfile,
+    candidateProfile: finalProfileName,
     helperOutput: persisted.stdout,
   }, null, 2));
+  await writeOptimizationReport(sessionDir, {
+    options, currentProfile, finalProfileName, explorationDecision,
+    confirmationDecision: confirmationSummary?.decision || null,
+    evaluation, bufferGeneration, bufferExplorationDecision,
+    bufferConfirmationDecision, bufferEvaluation,
+    persistenceStatus: "persisted",
+  });
   console.log("\nVerified profile persisted successfully.");
   await showStatus();
 };
@@ -345,7 +692,7 @@ const interactive = async () => {
   }
   const rl = createInterface({ input, output });
   try {
-    console.log("Tenyendama Linux Network Optimizer v3.0.1");
+    console.log("Tenyendama Linux Network Optimizer v3.1.0");
     console.log("1. Check environment");
     console.log("2. Run benchmark only");
     console.log("3. Optimize with two-stage verification");
@@ -359,7 +706,7 @@ const interactive = async () => {
 };
 
 const helpText = `
-Tenyendama Linux Network Optimizer v3.0.1
+Tenyendama Linux Network Optimizer v3.1.0
 
 Usage:
   ./bin/tenyendama-netopt [command] [options]
@@ -375,11 +722,54 @@ Commands:
   recover     Restore a benchmark interrupted by power loss or kill -9
   help        Show this help
 
+Common options:
+  --help      Show help
+  --version   Show version
+
+Command-specific options:
+  --preset PRESET             Measurement size and repetition count (quick, standard, deep)
+  --mode MODE                 Scoring policy; does not change measurement volume
+  --profiles LIST             Comma-separated built-in CC/qdisc profiles
+  --tune-buffers              Opt in to measured TCP socket-buffer ceiling comparison
+  --buffer-cap-mib NUMBER     Candidate cap from 4 through 256 MiB; requires --tune-buffers
+  --iface auto|NAME           Select the physical egress interface
+  --min-score-gap POINTS      Minimum score lead required for a winner (default: 2)
+  --seed NUMBER               Reproduce randomized benchmark order
+  --headed                    Show Chromium during measurement
+  --yes                       Skip prompts except the safety workflow itself
+  --runs NUMBER               Override runs per profile (benchmark only)
+  --cooldown SEC              Override delay between candidates
+  --no-warmup                 Disable the unscored warm-up
+  --background-threshold MBPS Background traffic warning threshold
+  --background-seconds SEC    Background traffic sampling duration
+  --background-action MODE    prompt, abort, or continue
+  --min-decision-runs NUMBER  Minimum runs required for a decision
+  --output-dir PATH           Select a benchmark result directory
+
+Modes:
+  balanced         Balance throughput, latency, and stability (default)
+  download         Prioritize download median and sustained download speed
+  upload           Prioritize upload median and sustained upload speed
+  latency          Prioritize low loaded latency and fewer latency spikes
+  streaming        Prioritize sustained upload, loaded latency, and stability
+  highperformance  Strongly prioritize download and upload throughput
+
+  Every mode retains route and protocol validation, loaded-latency and
+  variability limits, confirmation runs, and the minimum score gap.
+
+Presets:
+  quick, standard, deep
+
 Examples:
   ./bin/tenyendama-netopt check
   ./bin/tenyendama-netopt benchmark --preset standard --profiles cubic-fq,bbr-fq,cubic-fq_codel
   ./bin/tenyendama-netopt optimize --mode balanced
+  ./bin/tenyendama-netopt optimize --mode highperformance --tune-buffers
   ./bin/tenyendama-netopt rollback
+
+Safety notes:
+  benchmark never persists. optimize requires exploration, confirmation,
+  successful restoration, all safety gates, and explicit approval.
 `;
 
 const main = async () => {
@@ -389,6 +779,7 @@ const main = async () => {
   if (!command) return;
   switch (command) {
     case "help": case "--help": case "-h": console.log(helpText.trim()); break;
+    case "--version": case "version": console.log("3.1.0"); break;
     case "check": await run(process.execPath, [benchmarkScript, "--check-only", ...args]); break;
     case "benchmark": await run(process.execPath, [benchmarkScript, ...args]); break;
     case "optimize": await optimize(args); break;

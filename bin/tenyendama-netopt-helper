@@ -18,6 +18,9 @@ Usage:
   tenyendama-netopt-helper apply IFACE reno|cubic|bbr fq|fq_codel
   tenyendama-netopt-helper restore IFACE reno|cubic|bbr fq|fq_codel
   tenyendama-netopt-helper persist IFACE reno|cubic|bbr fq|fq_codel
+  tenyendama-netopt-helper apply-full IFACE CC QDISC CORE_RMEM_MAX CORE_WMEM_MAX TCP_RMEM_MIN TCP_RMEM_DEFAULT TCP_RMEM_MAX TCP_WMEM_MIN TCP_WMEM_DEFAULT TCP_WMEM_MAX TCP_MODERATE_RCVBUF
+  tenyendama-netopt-helper restore-full IFACE CC QDISC CORE_RMEM_MAX CORE_WMEM_MAX TCP_RMEM_MIN TCP_RMEM_DEFAULT TCP_RMEM_MAX TCP_WMEM_MIN TCP_WMEM_DEFAULT TCP_WMEM_MAX TCP_MODERATE_RCVBUF
+  tenyendama-netopt-helper persist-full IFACE CC QDISC CORE_RMEM_MAX CORE_WMEM_MAX TCP_RMEM_MIN TCP_RMEM_DEFAULT TCP_RMEM_MAX TCP_WMEM_MIN TCP_WMEM_DEFAULT TCP_WMEM_MAX TCP_MODERATE_RCVBUF
   tenyendama-netopt-helper rollback latest
   tenyendama-netopt-helper uninstall
   tenyendama-netopt-helper status IFACE
@@ -31,6 +34,29 @@ validate_iface() {
 }
 validate_cc() { case "$1" in reno|cubic|bbr) ;; *) echo "Unsupported congestion control: $1" >&2; exit 2;; esac; }
 validate_qdisc() { case "$1" in fq|fq_codel) ;; *) echo "Unsupported qdisc: $1" >&2; exit 2;; esac; }
+validate_positive() {
+  local name="$1" value="$2"
+  [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] ||
+    { echo "$name must be a positive decimal integer" >&2; exit 2; }
+}
+validate_full_args() {
+  local allow_large="$1"; shift
+  local core_r="$1" core_w="$2" rmin="$3" rdefault="$4" rmax="$5"
+  local wmin="$6" wdefault="$7" wmax="$8" moderate="$9" value
+  for value in "$core_r" "$core_w" "$rmin" "$rdefault" "$rmax" "$wmin" "$wdefault" "$wmax"; do
+    validate_positive "buffer value" "$value"
+    if [[ "$allow_large" != "yes" && "$value" -gt 268435456 ]]; then
+      echo "Buffer value exceeds 256 MiB" >&2; exit 2
+    fi
+  done
+  [[ "$moderate" =~ ^[01]$ ]] || { echo "tcp_moderate_rcvbuf must be 0 or 1" >&2; exit 2; }
+  (( rmin <= rdefault && rdefault <= rmax )) || { echo "Invalid tcp_rmem order" >&2; exit 2; }
+  (( wmin <= wdefault && wdefault <= wmax )) || { echo "Invalid tcp_wmem order" >&2; exit 2; }
+  if [[ "$allow_large" != "yes" ]]; then
+    (( core_r >= rmax && core_w >= wmax )) ||
+      { echo "Core maxima must cover TCP maxima" >&2; exit 2; }
+  fi
+}
 
 probe_cc() {
   local cc="$1"
@@ -71,6 +97,43 @@ apply_profile() {
   [[ "$actual_qdisc" == "$qdisc" ]] || { echo "qdisc verification failed: $actual_qdisc" >&2; exit 4; }
 }
 
+apply_full() {
+  local allow_large="$1" iface="$2" cc="$3" qdisc="$4"; shift 4
+  validate_iface "$iface"; validate_cc "$cc"; validate_qdisc "$qdisc"
+  validate_full_args "$allow_large" "$@"
+  local core_r="$1" core_w="$2" rmin="$3" rdefault="$4" rmax="$5"
+  local wmin="$6" wdefault="$7" wmax="$8" moderate="$9"
+  local current_r current_w temporary_r temporary_w
+  current_r="$(sysctl -n net.core.rmem_max)"
+  current_w="$(sysctl -n net.core.wmem_max)"
+  temporary_r="$core_r"; (( current_r > temporary_r )) && temporary_r="$current_r"
+  (( rmax > temporary_r )) && temporary_r="$rmax"
+  temporary_w="$core_w"; (( current_w > temporary_w )) && temporary_w="$current_w"
+  (( wmax > temporary_w )) && temporary_w="$wmax"
+  printf '%s\n' \
+    "[1/5] Applying temporary core safety ceilings (not final values):"
+  sysctl -w "net.core.rmem_max=$temporary_r"
+  sysctl -w "net.core.wmem_max=$temporary_w"
+  printf '%s\n' "[2/5] Applying target TCP buffer vectors:"
+  sysctl -w "net.ipv4.tcp_rmem=$rmin $rdefault $rmax"
+  sysctl -w "net.ipv4.tcp_wmem=$wmin $wdefault $wmax"
+  printf '%s\n' "[3/5] Applying target TCP receive autotuning state:"
+  sysctl -w "net.ipv4.tcp_moderate_rcvbuf=$moderate"
+  printf '%s\n' \
+    "[4/5] Applying final core ceilings (these replace the temporary values):"
+  sysctl -w "net.core.rmem_max=$core_r"
+  sysctl -w "net.core.wmem_max=$core_w"
+  printf '%s\n' "[5/5] Applying congestion control and qdisc:"
+  apply_profile "$iface" "$cc" "$qdisc"
+  [[ "$(sysctl -n net.core.rmem_max)" == "$core_r" ]]
+  [[ "$(sysctl -n net.core.wmem_max)" == "$core_w" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_rmem)" == "$rmin	$rdefault	$rmax" ||
+     "$(sysctl -n net.ipv4.tcp_rmem)" == "$rmin $rdefault $rmax" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_wmem)" == "$wmin	$wdefault	$wmax" ||
+     "$(sysctl -n net.ipv4.tcp_wmem)" == "$wmin $wdefault $wmax" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_moderate_rcvbuf)" == "$moderate" ]]
+}
+
 backup_path() {
   local backup="$1" path="$2"
   [[ -e "$path" || -L "$path" ]] || return 0
@@ -95,6 +158,20 @@ done
 [[ -d "/sys/class/net/$TENYENDAMA_IFACE" ]]
 sysctl -w "net.ipv4.tcp_congestion_control=$TENYENDAMA_CC"
 tc qdisc replace dev "$TENYENDAMA_IFACE" root "$TENYENDAMA_QDISC"
+if [[ -n "${TENYENDAMA_CORE_RMEM_MAX:-}" ]]; then
+  sysctl -w "net.core.rmem_max=$TENYENDAMA_CORE_RMEM_MAX"
+  sysctl -w "net.core.wmem_max=$TENYENDAMA_CORE_WMEM_MAX"
+  sysctl -w "net.ipv4.tcp_rmem=$TENYENDAMA_TCP_RMEM"
+  sysctl -w "net.ipv4.tcp_wmem=$TENYENDAMA_TCP_WMEM"
+  sysctl -w "net.ipv4.tcp_moderate_rcvbuf=$TENYENDAMA_TCP_MODERATE_RCVBUF"
+  [[ "$(sysctl -n net.core.rmem_max)" == "$TENYENDAMA_CORE_RMEM_MAX" ]]
+  [[ "$(sysctl -n net.core.wmem_max)" == "$TENYENDAMA_CORE_WMEM_MAX" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_rmem | tr '\t' ' ')" == "$TENYENDAMA_TCP_RMEM" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_wmem | tr '\t' ' ')" == "$TENYENDAMA_TCP_WMEM" ]]
+  [[ "$(sysctl -n net.ipv4.tcp_moderate_rcvbuf)" == "$TENYENDAMA_TCP_MODERATE_RCVBUF" ]]
+fi
+[[ "$(sysctl -n net.ipv4.tcp_congestion_control)" == "$TENYENDAMA_CC" ]]
+[[ "$(tc qdisc show dev "$TENYENDAMA_IFACE" | awk 'NR == 1 {print $2}')" == "$TENYENDAMA_QDISC" ]]
 EOF
   install -m 0755 "$tmp" "$APPLY_SCRIPT"
   rm -f "$tmp"
@@ -123,12 +200,17 @@ EOF
 }
 
 persist_profile() {
-  local iface="$1" cc="$2" qdisc="$3"
+  local iface="$1" cc="$2" qdisc="$3"; shift 3
+  local full="no"
+  [[ $# -eq 9 ]] && full="yes"
   validate_iface "$iface"; validate_cc "$cc"; validate_qdisc "$qdisc"
+  [[ "$full" == "no" || $# -eq 9 ]] || { usage >&2; exit 2; }
+  [[ "$full" == "no" ]] || validate_full_args "no" "$@"
   command -v systemctl >/dev/null || { echo "systemd is required for persistence" >&2; exit 5; }
   [[ -d /run/systemd/system ]] || { echo "systemd is not active" >&2; exit 5; }
 
   local id backup previous_cc previous_qdisc previous_current sysctl_file
+  local previous_core_r previous_core_w previous_tcp_r previous_tcp_w previous_moderate
   id="$(date -u +%Y%m%d-%H%M%S)"
   backup="$BACKUP_ROOT/$id"
   [[ ! -e "$backup" ]] || { id="$id-$$"; backup="$BACKUP_ROOT/$id"; }
@@ -138,6 +220,11 @@ persist_profile() {
 
   previous_cc="$(sysctl -n net.ipv4.tcp_congestion_control)"
   previous_qdisc="$(tc qdisc show dev "$iface" | awk 'NR == 1 {print $2}')"
+  previous_core_r="$(sysctl -n net.core.rmem_max)"
+  previous_core_w="$(sysctl -n net.core.wmem_max)"
+  previous_tcp_r="$(sysctl -n net.ipv4.tcp_rmem)"
+  previous_tcp_w="$(sysctl -n net.ipv4.tcp_wmem)"
+  previous_moderate="$(sysctl -n net.ipv4.tcp_moderate_rcvbuf)"
   previous_current=""
   [[ -f "$CURRENT_POINTER" ]] && previous_current="$(cat "$CURRENT_POINTER")"
 
@@ -155,6 +242,11 @@ persist_profile() {
     printf 'IFACE=%q\n' "$iface"
     printf 'ORIGINAL_CC=%q\n' "$previous_cc"
     printf 'ORIGINAL_QDISC=%q\n' "$previous_qdisc"
+    printf 'ORIGINAL_CORE_RMEM_MAX=%q\n' "$previous_core_r"
+    printf 'ORIGINAL_CORE_WMEM_MAX=%q\n' "$previous_core_w"
+    printf 'ORIGINAL_TCP_RMEM=%q\n' "$previous_tcp_r"
+    printf 'ORIGINAL_TCP_WMEM=%q\n' "$previous_tcp_w"
+    printf 'ORIGINAL_TCP_MODERATE_RCVBUF=%q\n' "$previous_moderate"
     printf 'PREVIOUS_CURRENT_ID=%q\n' "$previous_current"
     printf 'PREVIOUS_SERVICE_ENABLED=%q\n' "$previous_service_enabled"
     printf 'PREVIOUS_SERVICE_ACTIVE=%q\n' "$previous_service_active"
@@ -168,12 +260,21 @@ persist_profile() {
   install -d -m 0755 "$CONFIG_DIR"
   sysctl_file="$SYSCTL_DIR/${SYSCTL_PREFIX}${id}.conf"
   cat > "$sysctl_file" <<EOF
-# Generated by Tenyendama Linux Network Optimizer v3.0.1
+# Generated by Tenyendama Linux Network Optimizer v3.1.0
 # Backup ID: $id
 # Physical interface: $iface
 net.core.default_qdisc = $qdisc
 net.ipv4.tcp_congestion_control = $cc
 EOF
+  if [[ "$full" == "yes" ]]; then
+    {
+      printf 'net.core.rmem_max = %s\n' "$1"
+      printf 'net.core.wmem_max = %s\n' "$2"
+      printf 'net.ipv4.tcp_rmem = %s %s %s\n' "$3" "$4" "$5"
+      printf 'net.ipv4.tcp_wmem = %s %s %s\n' "$6" "$7" "$8"
+      printf 'net.ipv4.tcp_moderate_rcvbuf = %s\n' "$9"
+    } >> "$sysctl_file"
+  fi
   chmod 0644 "$sysctl_file"
 
   {
@@ -182,6 +283,14 @@ EOF
     printf 'TENYENDAMA_QDISC=%q\n' "$qdisc"
     printf 'TENYENDAMA_SYSCTL_FILE=%q\n' "$sysctl_file"
     printf 'TENYENDAMA_BACKUP_ID=%q\n' "$id"
+    if [[ "$full" == "yes" ]]; then
+      printf 'TENYENDAMA_BUFFER_PROFILE=%q\n' "measured"
+      printf 'TENYENDAMA_CORE_RMEM_MAX=%q\n' "$1"
+      printf 'TENYENDAMA_CORE_WMEM_MAX=%q\n' "$2"
+      printf 'TENYENDAMA_TCP_RMEM=%q\n' "$3 $4 $5"
+      printf 'TENYENDAMA_TCP_WMEM=%q\n' "$6 $7 $8"
+      printf 'TENYENDAMA_TCP_MODERATE_RCVBUF=%q\n' "$9"
+    fi
   } > "$CURRENT_ENV"
   chmod 0644 "$CURRENT_ENV"
   write_apply_script
@@ -189,7 +298,11 @@ EOF
 
   systemctl daemon-reload
   sysctl --system
-  apply_profile "$iface" "$cc" "$qdisc"
+  if [[ "$full" == "yes" ]]; then
+    apply_full "no" "$iface" "$cc" "$qdisc" "$@"
+  else
+    apply_profile "$iface" "$cc" "$qdisc"
+  fi
   systemctl enable --now tenyendama-netopt.service
   printf '%s\n' "$id" > "$CURRENT_POINTER"
   chmod 0644 "$CURRENT_POINTER"
@@ -228,6 +341,14 @@ rollback_id() {
   systemctl daemon-reload
   sysctl --system
   apply_profile "$IFACE" "$ORIGINAL_CC" "$ORIGINAL_QDISC"
+  if [[ -n "${ORIGINAL_TCP_RMEM:-}" ]]; then
+    read -r rmin rdefault rmax <<<"$ORIGINAL_TCP_RMEM"
+    read -r wmin wdefault wmax <<<"$ORIGINAL_TCP_WMEM"
+    apply_full "yes" "$IFACE" "$ORIGINAL_CC" "$ORIGINAL_QDISC" \
+      "$ORIGINAL_CORE_RMEM_MAX" "$ORIGINAL_CORE_WMEM_MAX" \
+      "$rmin" "$rdefault" "$rmax" "$wmin" "$wdefault" "$wmax" \
+      "$ORIGINAL_TCP_MODERATE_RCVBUF"
+  fi
 
   if [[ -f "$SERVICE_FILE" ]]; then
     [[ "$PREVIOUS_SERVICE_ENABLED" == "enabled" ]] && systemctl enable tenyendama-netopt.service >/dev/null
@@ -267,13 +388,50 @@ uninstall_all() {
 
 status_profile() {
   local iface="$1"; validate_iface "$iface"
+  [[ -f "$CURRENT_ENV" ]] && source "$CURRENT_ENV"
   printf 'iface=%s\n' "$iface"
   printf 'cc=%s\n' "$(sysctl -n net.ipv4.tcp_congestion_control)"
   printf 'available_cc=%s\n' "$(sysctl -n net.ipv4.tcp_available_congestion_control)"
   printf 'qdisc=%s\n' "$(tc qdisc show dev "$iface" | awk 'NR == 1 {print $2}')"
+  printf 'core_rmem_max=%s\n' "$(sysctl -n net.core.rmem_max)"
+  printf 'core_wmem_max=%s\n' "$(sysctl -n net.core.wmem_max)"
+  printf 'tcp_rmem=%s\n' "$(sysctl -n net.ipv4.tcp_rmem)"
+  printf 'tcp_wmem=%s\n' "$(sysctl -n net.ipv4.tcp_wmem)"
+  printf 'tcp_mem=%s (diagnostic-only)\n' "$(sysctl -n net.ipv4.tcp_mem)"
+  printf 'tcp_moderate_rcvbuf=%s\n' "$(sysctl -n net.ipv4.tcp_moderate_rcvbuf)"
+  printf 'tcp_window_scaling=%s (diagnostic-only)\n' "$(sysctl -n net.ipv4.tcp_window_scaling)"
+  printf 'managed_buffer_profile=%s\n' "${TENYENDAMA_BUFFER_PROFILE:-none}"
   [[ -f "$CURRENT_POINTER" ]] && printf 'managed_backup=%s\n' "$(cat "$CURRENT_POINTER")" || printf 'managed_backup=none\n'
   [[ -f "$CURRENT_ENV" ]] && cat "$CURRENT_ENV"
 }
+
+helper_selftest() {
+  validate_cc cubic
+  validate_qdisc fq
+  validate_full_args "no" \
+    8388608 8388608 4096 131072 6291456 4096 16384 4194304 1
+  (validate_full_args "no" \
+    212992 212992 4096 131072 6291456 4096 16384 4194304 1) \
+    >/dev/null 2>&1 &&
+    { echo "selftest expected inconsistent tuning values to fail" >&2; exit 1; }
+  validate_full_args "yes" \
+    212992 212992 4096 131072 6291456 4096 16384 4194304 1
+  (validate_full_args "no" \
+    8388608 8388608 131072 4096 6291456 4096 16384 4194304 1) \
+    >/dev/null 2>&1 &&
+    { echo "selftest expected unordered vectors to fail" >&2; exit 1; }
+  (validate_full_args "no" \
+    536870912 8388608 4096 131072 6291456 4096 16384 4194304 1) \
+    >/dev/null 2>&1 &&
+    { echo "selftest expected values above 256 MiB to fail" >&2; exit 1; }
+  echo "Helper self-test: OK"
+}
+
+if [[ "${1:-}" == "--selftest" ]]; then
+  [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+  helper_selftest
+  exit 0
+fi
 
 [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "This helper must run as root." >&2; exit 1; }
 command -v flock >/dev/null || { echo "flock is required." >&2; exit 1; }
@@ -285,6 +443,9 @@ case "$action" in
   probe) [[ $# -eq 2 ]] || { usage >&2; exit 2; }; probe_cc "$2" ;;
   apply|restore) [[ $# -eq 4 ]] || { usage >&2; exit 2; }; apply_profile "$2" "$3" "$4" ;;
   persist) [[ $# -eq 4 ]] || { usage >&2; exit 2; }; persist_profile "$2" "$3" "$4" ;;
+  apply-full) [[ $# -eq 13 ]] || { usage >&2; exit 2; }; apply_full "no" "${@:2}" ;;
+  restore-full) [[ $# -eq 13 ]] || { usage >&2; exit 2; }; apply_full "yes" "${@:2}" ;;
+  persist-full) [[ $# -eq 13 ]] || { usage >&2; exit 2; }; persist_profile "${@:2}" ;;
   rollback) [[ $# -eq 2 && "$2" == "latest" ]] || { usage >&2; exit 2; }; rollback_latest ;;
   uninstall) [[ $# -eq 1 ]] || { usage >&2; exit 2; }; uninstall_all ;;
   status) [[ $# -eq 2 ]] || { usage >&2; exit 2; }; status_profile "$2" ;;

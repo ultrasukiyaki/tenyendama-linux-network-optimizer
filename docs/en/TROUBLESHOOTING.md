@@ -19,3 +19,7 @@ Inspect `environment.json`, the run JSON files, and the report's **Traffic path 
 ```bash
 ./bin/tenyendama-netopt recover
 ```
+
+## TCP buffer tuning is skipped
+
+Inspect `environment.json` and `buffer-candidates.json`. Common safe-skip reasons are disabled `tcp_moderate_rcvbuf` or window scaling, missing MemTotal/sysctl values, QUIC or route validation failure, invalid bandwidth/RTT, a current value above the cap, or no distinct candidate. The tool deliberately does not enable those kernel features.

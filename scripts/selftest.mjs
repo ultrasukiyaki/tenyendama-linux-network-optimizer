@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   balancedOrder,
   coefficientOfVariation,
@@ -66,5 +67,17 @@ assert.equal(estimateTransferBytes({
   profileCount: 2, runs: 1, downloadBytes: 10, downloadCount: 2,
   uploadBytes: 5, uploadCount: 2, warmup: false,
 }), 60);
+
+const helperSelftest = spawnSync(
+  "bash",
+  ["bin/tenyendama-netopt-helper", "--selftest"],
+  { encoding: "utf8" }
+);
+assert.equal(
+  helperSelftest.status,
+  0,
+  `${helperSelftest.stdout}${helperSelftest.stderr}`
+);
+assert.match(helperSelftest.stdout, /Helper self-test: OK/);
 
 console.log("Self-test: OK");

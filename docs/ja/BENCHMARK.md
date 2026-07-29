@@ -29,3 +29,16 @@ Chromium CDPでCloudflareの`__down` / `__up`ごとにprotocolとremote IPを取
 ## 注意
 
 Cloudflareエッジ・ISP経路・時間帯で結果は変動します。重要な環境では別時間帯でも`benchmark`を実行し、レポートを比較してください。
+
+評価モードは`balanced`、`download`、`upload`、`latency`、`streaming`、`highperformance`です。highperformanceはダウンロード・アップロードをより重視しますが、経路・プロトコル検証、Loaded latency、スパイク、変動、最小スコア差、確認測定を緩和しません。
+
+各モードの目的：
+
+- `balanced`：ダウンロード、アップロード、Loaded latency、安定性、スパイクを総合評価するデフォルトモード
+- `download`：ダウンロードの中央値とp05（持続速度）を重視
+- `upload`：アップロードの中央値とp05（持続速度）を重視
+- `latency`：Loaded latencyの中央値・p95とスパイクの少なさを重視
+- `streaming`：持続アップロード、Loaded latency、安定性を重視
+- `highperformance`：安全条件を緩和せず、ダウンロードとアップロードの帯域性能を強く重視
+
+`--tune-buffers`指定時は選択したCC/qdiscを固定し、`current`、`bdp-2x`、`bdp-4x`を探索して、current以外の勝者を再確認します。受信・送信BDPは各帯域中央値とUnloaded RTTから別々に算出します。候補は現在値を下げず、自動上限`min(64 MiB, max(4 MiB, MemTotal/128))`またはユーザー指定4～256MiBを超えません。autotuning/window scaling無効、値不足、経路・プロトコル不正、currentしか残らない場合は安全にスキップします。

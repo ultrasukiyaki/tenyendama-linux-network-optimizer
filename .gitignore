@@ -3,3 +3,4 @@ results/
 .state/
 *.log
 .DS_Store
+dist/

@@ -9,6 +9,6 @@
 7. `/etc/sysctl.d`、systemd service、バックアップの差分を監査する。
 8. README、CHANGELOG、LICENSE、SHA-256を確認する。
 9. Private repositoryの`main`へ初回コミットする。
-10. 実機検証完了後に`v3.0.1`タグを作成する。
+10. 実機検証完了後に`v3.1.0`タグを作成する。
 
 この配布ZIPは依存バージョンを`package.json`で固定しています。`package-lock.json`は最初の`npm install`時に生成されます。

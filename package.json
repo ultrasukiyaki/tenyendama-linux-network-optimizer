@@ -1,6 +1,6 @@
 {
   "name": "tenyendama-linux-network-optimizer",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "description": "Safety-first Linux network benchmarking and auto-tuning with two-stage verification and rollback.",

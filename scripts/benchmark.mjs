@@ -25,10 +25,13 @@ import {
   buildCsv,
   buildReport,
   decideProfiles,
+  runHasRequiredMetrics,
   summarizeRun,
 } from "../lib/report.mjs";
 import { balancedOrder, createSeededRandom, shuffled } from "../lib/stats.mjs";
 import { PROFILE_REGISTRY } from "../lib/optimizer.mjs";
+import { MODE_DESCRIPTIONS, MODE_REGISTRY, normalizeMode } from "../lib/stats.mjs";
+import { validateBufferProfile } from "../lib/tcp-buffer.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDirectory, "..");
@@ -78,6 +81,7 @@ const parseArguments = (argv) => {
     preset: "standard",
     mode: "balanced",
     profiles: ["cubic-fq", "bbr-fq"],
+    profileFile: null,
     headless: true,
     helper: defaultHelper,
     port: 4173,
@@ -120,6 +124,12 @@ const parseArguments = (argv) => {
         break;
       case "--profiles":
         options.profiles = requireValue(argument, next).split(",");
+        explicit.add("profiles");
+        index += 1;
+        break;
+      case "--profile-file":
+        options.profileFile = resolve(requireValue(argument, next));
+        explicit.add("profileFile");
         index += 1;
         break;
       case "--runs":
@@ -197,8 +207,12 @@ const parseArguments = (argv) => {
   if (!/^(auto|[a-zA-Z0-9_.:-]+)$/.test(options.iface)) {
     throw new Error(`Invalid interface name: ${options.iface}`);
   }
-  if (!["balanced", "download", "upload", "latency", "streaming"].includes(options.mode)) {
-    throw new Error(`Unknown scoring mode: ${options.mode}`);
+  options.requestedMode = options.mode;
+  options.mode = normalizeMode(options.mode);
+  options.modeDescription = MODE_DESCRIPTIONS[options.mode];
+  options.scoringWeights = MODE_REGISTRY[options.mode];
+  if (explicit.has("profiles") && explicit.has("profileFile")) {
+    throw new Error("--profiles and --profile-file cannot be used together");
   }
   if (!Number.isInteger(options.runs) || options.runs < 1 || options.runs > 10) {
     throw new Error("--runs must be an integer from 1 to 10");
@@ -212,7 +226,7 @@ const parseArguments = (argv) => {
   if (!["prompt", "abort", "continue"].includes(options.backgroundAction)) {
     throw new Error("--background-action must be prompt, abort, or continue");
   }
-  for (const name of options.profiles) {
+  for (const name of options.profileFile ? [] : options.profiles) {
     if (!PROFILE_REGISTRY[name]) throw new Error(`Unknown profile: ${name}`);
   }
 
@@ -220,7 +234,7 @@ const parseArguments = (argv) => {
 };
 
 const helpText = `
-Tenyendama Linux Network Optimizer v3.0.1 — Benchmark Engine v0.2.2
+Tenyendama Linux Network Optimizer v3.1.0 — Benchmark Engine v0.3.0
 
 Usage:
   ./bin/tenyendama-netbench --preset standard --mode balanced
@@ -228,7 +242,7 @@ Usage:
 Options:
   --iface auto|NAME            Auto-detect physical egress or specify it
   --preset quick|standard|confirmation|deep Measurement size and repeat count
-  --mode balanced|download|upload|latency|streaming
+  --mode MODE                  Scoring policy; includes highperformance
   --profiles LIST              Comma-separated profile names
   --runs NUMBER                Override measured runs per profile
   --cooldown SEC               Override delay between tests
@@ -252,6 +266,17 @@ Profiles:
   cubic-fq_codel
   bbr-fq
   bbr-fq_codel
+
+Modes:
+  balanced         Balance throughput, latency, and stability (default)
+  download         Prioritize download median and sustained download speed
+  upload           Prioritize upload median and sustained upload speed
+  latency          Prioritize low loaded latency and fewer latency spikes
+  streaming        Prioritize sustained upload, loaded latency, and stability
+  highperformance  Strongly prioritize download and upload throughput
+
+All modes retain the same route, protocol, latency, variability, confirmation,
+and minimum-score-gap safety gates.
 `;
 
 const sleep = (milliseconds) =>
@@ -272,6 +297,16 @@ const fileExists = async (path) => {
     return false;
   }
 };
+
+const hasCompleteBufferSnapshot = (snapshot) =>
+  snapshot &&
+  Number.isSafeInteger(snapshot.coreRmemMax) && snapshot.coreRmemMax > 0 &&
+  Number.isSafeInteger(snapshot.coreWmemMax) && snapshot.coreWmemMax > 0 &&
+  Array.isArray(snapshot.tcpRmem) && snapshot.tcpRmem.length === 3 &&
+  snapshot.tcpRmem.every((value) => Number.isSafeInteger(value) && value > 0) &&
+  Array.isArray(snapshot.tcpWmem) && snapshot.tcpWmem.length === 3 &&
+  snapshot.tcpWmem.every((value) => Number.isSafeInteger(value) && value > 0) &&
+  [0, 1].includes(snapshot.tcpModerateRcvbuf);
 
 const promptBackgroundDecision = async (traffic) => {
   if (!input.isTTY || !output.isTTY) return "abort";
@@ -336,13 +371,18 @@ const recoverState = async (helper) => {
   await runCommand("sudo", ["-v"], { capture: false, timeoutMs: 120_000 });
   await runCommand(
     "sudo",
-    [
-      helper,
-      "restore",
-      state.physicalIface,
-      state.originalCc,
-      state.originalQdisc,
-    ],
+    hasCompleteBufferSnapshot({
+      coreRmemMax: state.originalCoreRmemMax,
+      coreWmemMax: state.originalCoreWmemMax,
+      tcpRmem: state.originalTcpRmem,
+      tcpWmem: state.originalTcpWmem,
+      tcpModerateRcvbuf: state.originalTcpModerateRcvbuf,
+    })
+      ? [helper, "restore-full", state.physicalIface, state.originalCc,
+        state.originalQdisc, String(state.originalCoreRmemMax),
+        String(state.originalCoreWmemMax), ...state.originalTcpRmem.map(String),
+        ...state.originalTcpWmem.map(String), String(state.originalTcpModerateRcvbuf)]
+      : [helper, "restore", state.physicalIface, state.originalCc, state.originalQdisc],
     { capture: false, timeoutMs: 30_000 }
   );
   await rm(activeStatePath, { force: true });
@@ -384,14 +424,27 @@ const main = async () => {
   ]);
   const originalQdisc = await qdiscKind(physicalIface);
 
-  let profiles = options.profiles.map((name) => PROFILE_REGISTRY[name]);
+  let profiles;
+  if (options.profileFile) {
+    const document = JSON.parse(await readFile(options.profileFile, "utf8"));
+    if (!Array.isArray(document) || document.length < 1 || document.length > 16) {
+      throw new Error("--profile-file must contain an array of 1 through 16 profiles");
+    }
+    profiles = document.map((profile) => validateBufferProfile(profile, {
+      allowAboveCap: profile?.source === "current",
+    }));
+  } else {
+    profiles = options.profiles.map((name) => PROFILE_REGISTRY[name]);
+  }
+  const currentProfileKey = profiles.find((profile) => profile.source === "current")?.name
+    || `${originalCc}-${originalQdisc}`;
   const outputDirectory = options.outputDir || join(projectRoot, "results", "benchmarks", timestampName());
   await mkdir(outputDirectory, { recursive: true });
   await mkdir(stateDirectory, { recursive: true });
 
   const environment = {
-    version: "3.0.1",
-    benchmarkEngineVersion: "0.2.2",
+    version: "3.1.0",
+    benchmarkEngineVersion: "0.3.0",
     startedAt: new Date().toISOString(),
     routingIface,
     physicalIface,
@@ -399,12 +452,28 @@ const main = async () => {
     interfaceWarning: resolved.warning || null,
     originalCc,
     originalQdisc,
-    currentProfile: `${originalCc}-${originalQdisc}`,
+    currentProfile: currentProfileKey,
     profiles,
     options,
     backgroundChecks: [],
     snapshot: await collectEnvironment({ routingIface, physicalIface }),
   };
+  for (const profile of profiles.filter((item) => item.source === "current")) {
+    const startingBuffers = environment.snapshot.tcpBuffers;
+    const expected = {
+      coreRmemMax: startingBuffers.coreRmemMax,
+      coreWmemMax: startingBuffers.coreWmemMax,
+      tcpRmem: startingBuffers.tcpRmem,
+      tcpWmem: startingBuffers.tcpWmem,
+      tcpModerateRcvbuf: startingBuffers.tcpModerateRcvbuf,
+    };
+    if (JSON.stringify(profile.buffers) !== JSON.stringify(expected)) {
+      throw new Error(
+        `Current buffer profile ${profile.name} does not exactly match `
+        + "the starting kernel buffer snapshot."
+      );
+    }
+  }
 
   await writeFile(
     join(outputDirectory, "environment.json"),
@@ -475,6 +544,11 @@ const main = async () => {
     physicalIface,
     originalCc,
     originalQdisc,
+    originalCoreRmemMax: environment.snapshot.tcpBuffers.coreRmemMax,
+    originalCoreWmemMax: environment.snapshot.tcpBuffers.coreWmemMax,
+    originalTcpRmem: environment.snapshot.tcpBuffers.tcpRmem,
+    originalTcpWmem: environment.snapshot.tcpBuffers.tcpWmem,
+    originalTcpModerateRcvbuf: environment.snapshot.tcpBuffers.tcpModerateRcvbuf,
     helper,
     outputDirectory,
   };
@@ -492,7 +566,14 @@ const main = async () => {
     );
     const result = await runCommand(
       "sudo",
-      [helper, "restore", physicalIface, originalCc, originalQdisc],
+      hasCompleteBufferSnapshot(environment.snapshot.tcpBuffers)
+        ? [helper, "restore-full", physicalIface, originalCc, originalQdisc,
+          String(environment.snapshot.tcpBuffers.coreRmemMax),
+          String(environment.snapshot.tcpBuffers.coreWmemMax),
+          ...environment.snapshot.tcpBuffers.tcpRmem.map(String),
+          ...environment.snapshot.tcpBuffers.tcpWmem.map(String),
+          String(environment.snapshot.tcpBuffers.tcpModerateRcvbuf)]
+        : [helper, "restore", physicalIface, originalCc, originalQdisc],
       { capture: false, allowFailure: true, timeoutMs: 30_000 }
     );
     restored = result.code === 0;
@@ -500,8 +581,15 @@ const main = async () => {
       await rm(activeStatePath, { force: true });
       console.log("Original network profile restored.");
     } else {
+      const tcp = environment.snapshot.tcpBuffers;
+      const manualRestore = hasCompleteBufferSnapshot(tcp)
+        ? `sudo ${helper} restore-full ${physicalIface} ${originalCc} ${originalQdisc} `
+          + `${tcp.coreRmemMax} ${tcp.coreWmemMax} `
+          + `${tcp.tcpRmem.join(" ")} ${tcp.tcpWmem.join(" ")} `
+          + `${tcp.tcpModerateRcvbuf}`
+        : `sudo ${helper} restore ${physicalIface} ${originalCc} ${originalQdisc}`;
       console.error(
-        `RESTORE FAILED. Run: sudo ${helper} restore ${physicalIface} ${originalCc} ${originalQdisc}`
+        `RESTORE FAILED. Run: ${manualRestore}`
       );
     }
     return restored;
@@ -574,7 +662,13 @@ const main = async () => {
     const applyProfile = async (profile) => {
       await runCommand(
         "sudo",
-        [helper, "apply", physicalIface, profile.cc, profile.qdisc],
+        profile.buffers
+          ? [helper, profile.source === "current" ? "restore-full" : "apply-full",
+            physicalIface, profile.cc, profile.qdisc,
+            String(profile.buffers.coreRmemMax), String(profile.buffers.coreWmemMax),
+            ...profile.buffers.tcpRmem.map(String), ...profile.buffers.tcpWmem.map(String),
+            String(profile.buffers.tcpModerateRcvbuf)]
+          : [helper, "apply", physicalIface, profile.cc, profile.qdisc],
         { capture: false, timeoutMs: 30_000 }
       );
     };
@@ -702,6 +796,17 @@ const main = async () => {
           summary.routeFailureReason || "Traffic-path validation did not pass."
         );
       }
+      if (!runHasRequiredMetrics(summary)) {
+        summary.exclusionReasons.push(
+          "Required throughput, latency, spike, or variability metrics are missing or invalid."
+        );
+      }
+      if (Number(summary.loadedLatencyMaxMs) > 250) {
+        summary.exclusionReasons.push("Loaded latency exceeded the 250 ms safety limit.");
+      }
+      if (Number(summary.downloadCv) > 0.35 || Number(summary.uploadCv) > 0.35) {
+        summary.exclusionReasons.push("Throughput variation exceeded the safety limit.");
+      }
       summary.eligible = summary.exclusionReasons.length === 0;
       runs.push(summary);
 
@@ -744,7 +849,14 @@ const main = async () => {
     await writeFile(join(outputDirectory, "raw-results.csv"), buildCsv(runs));
     await writeFile(
       join(outputDirectory, "summary.json"),
-      JSON.stringify({ decision, profiles: aggregates }, null, 2)
+      JSON.stringify({
+        requestedMode: options.requestedMode,
+        normalizedMode: options.mode,
+        modeDescription: options.modeDescription,
+        scoringWeights: options.scoringWeights,
+        decision,
+        profiles: aggregates,
+      }, null, 2)
     );
     await writeFile(
       join(outputDirectory, "decision.json"),

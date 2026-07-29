@@ -122,4 +122,7 @@ test("persistence requires a passing route and matching winner/gap", () => {
     ...base, decision: { status: "winner", recommendedProfile: "bbr-fq", scoreGap: 1 },
     runs: [run],
   }).accepted, false);
+  assert.equal(evaluateConfirmation({
+    ...base, runs: [run], backgroundTrafficPassed: false,
+  }).accepted, false);
 });

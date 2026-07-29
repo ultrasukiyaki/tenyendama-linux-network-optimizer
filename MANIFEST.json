@@ -1,8 +1,13 @@
 [
   {
+    "path": "CHANGELOG.ja.md",
+    "sha256": "372e4d7b20e772c8effe60b82cb34c49142c94223344a7b8af404b2b815d529e",
+    "bytes": 3427
+  },
+  {
     "path": "CHANGELOG.md",
-    "sha256": "966dde97476d7f3fa02e88ee595c893e004ad27d78f9c43a6d4d97f70a665cb1",
-    "bytes": 1375
+    "sha256": "97ed4ceccfdeda6e1114abaf5a671b2c9bb2edc7bf8fc192807fb9841516647a",
+    "bytes": 2494
   },
   {
     "path": "LICENSE",
@@ -11,18 +16,18 @@
   },
   {
     "path": "README.ja.md",
-    "sha256": "77d6452166dc542e45aabfead99b5441756f62ebf12cbd97d9a03a5b8821740a",
-    "bytes": 1582
+    "sha256": "d0d7fc691988ec35dda639fca0199baabf670767f2a9b487737d59124460a12b",
+    "bytes": 4594
   },
   {
     "path": "README.md",
-    "sha256": "cd0d8292a0be302ae1944b51e57cea95278138585f01245ba7b3a1e0fe6aadf1",
-    "bytes": 1937
+    "sha256": "76733130ca56b699098766856823cf4ecbd1ddffbd3cf06240e3e807872e89f9",
+    "bytes": 4661
   },
   {
     "path": "SECURITY.md",
-    "sha256": "ee482eb9ee3ad13fb2a2180beaa2f5e9de94b6b7aa48b501b1c403329a3882f9",
-    "bytes": 674
+    "sha256": "1b3209c60622671a36faf5f84224f457c575986c652baa1b1fa6839c9b5452d5",
+    "bytes": 963
   },
   {
     "path": "THIRD-PARTY-NOTICES.md",
@@ -36,13 +41,13 @@
   },
   {
     "path": "bin/tenyendama-netopt-helper",
-    "sha256": "a7b93de0e772cd7344200c5ca3b0e5c094b988a2342ac160051a4645eaca7334",
-    "bytes": 10546
+    "sha256": "ec9586816a5870283132fa1350edca2a7073b240a9e29d62107d286ee0119eb3",
+    "bytes": 18866
   },
   {
     "path": "docs/en/BENCHMARK.md",
-    "sha256": "c65ff8506286216ad06c5a6ae02db86f801ddc0c7434d1f136527b449546fd48",
-    "bytes": 902
+    "sha256": "161b9fdad77084c22a52860d53ba34fd423d4a4f9f7724f767986093c033083a",
+    "bytes": 2191
   },
   {
     "path": "docs/en/GITHUB.md",
@@ -61,18 +66,18 @@
   },
   {
     "path": "docs/en/SAFETY.md",
-    "sha256": "f9eda9b24f4dc41c7617bb9c08d153338cbebec2c652e363b6b345c93ff26adc",
-    "bytes": 596
+    "sha256": "5f444e18c7a067e54fe385984da96453b933b200abad34f838aea2fb07fc212c",
+    "bytes": 1258
   },
   {
     "path": "docs/en/TROUBLESHOOTING.md",
-    "sha256": "de2476cbe3e2a10ee30e792750590959e3a6e706a947a26411061143433b12ea",
-    "bytes": 646
+    "sha256": "7bc3dfadaf61703a1d47f0550ce99d16748059f753b616c4816ef530f4b8d071",
+    "bytes": 1023
   },
   {
     "path": "docs/ja/BENCHMARK.md",
-    "sha256": "ff8720643208a6bc938b76afec49ecf21feea7858c55709ddedab3f56d348eef",
-    "bytes": 1438
+    "sha256": "145844503e6694b2e3655c609c38b4d3edb311c8af95d8cad5ec1ae2a0e53d4c",
+    "bytes": 2911
   },
   {
     "path": "docs/ja/GITHUB.md",
@@ -86,18 +91,18 @@
   },
   {
     "path": "docs/ja/RELEASE-CHECKLIST.md",
-    "sha256": "02d998eea583289265f2f47c29e22175f34c3ac6d0a7ca79786de7c4b4e6ee01",
+    "sha256": "f1817929efb1981225231d3810c067dc7c5889b1964e42def36092f4c98c54b7",
     "bytes": 888
   },
   {
     "path": "docs/ja/SAFETY.md",
-    "sha256": "4bdc5b9e5f9b34a9f5e3e2369d6ac8a16048b71e96e87d0aa281d9829d56be56",
-    "bytes": 1500
+    "sha256": "462f463405af5232a49f7534a1cdab77c808e6aab5d79a544bf8f8d56a3e250f",
+    "bytes": 2279
   },
   {
     "path": "docs/ja/TROUBLESHOOTING.md",
-    "sha256": "9f92f2b3952824dbdaf5ea619a102d64d1dd3509c36866c8e399848b84dc39fd",
-    "bytes": 808
+    "sha256": "a2e424b74d1ea14369733c7687c6254167d6e885f09fb8b6903b620b06c9a79b",
+    "bytes": 1214
   },
   {
     "path": "index.html",
@@ -111,8 +116,8 @@
   },
   {
     "path": "lib/network.mjs",
-    "sha256": "9af169f3e0b5754424ffde982894ceb45af1f0edac935d6090effc43f1c33ed2",
-    "bytes": 12427
+    "sha256": "6a5e6ce00a253dc2566b19c0d0867ee956768ae7ef524db4d037ad660df7e6e0",
+    "bytes": 14527
   },
   {
     "path": "lib/optimizer.mjs",
@@ -121,43 +126,48 @@
   },
   {
     "path": "lib/report.mjs",
-    "sha256": "aa3a32f1b673c31d92a7bc0fa1cf2e1a977e6c22a8a5e4bad0b97e53add59faa",
-    "bytes": 11720
+    "sha256": "5407d51626a4964473ae979513c98b41f21fb3aa7a5267907f74b32c210b8072",
+    "bytes": 14648
   },
   {
     "path": "lib/stats.mjs",
-    "sha256": "8f6f283a69772d991e7242c6b1925ae741e69a585ed1b245df5cadecb102d561",
-    "bytes": 9218
+    "sha256": "b6dbc48479f2e9e12512ff9248631099bf1d74511f1821f3fe379de0a7bbf220",
+    "bytes": 10347
+  },
+  {
+    "path": "lib/tcp-buffer.mjs",
+    "sha256": "5b9d95f4812fcd67df049e52dd0dcb50f9936b07f3bea77885efa445289adeb1",
+    "bytes": 6383
   },
   {
     "path": "package-lock.json",
-    "sha256": "d3a657b61b543d7b43b9ab726a015d1fe7f497def827404cf4a32ed56c332369",
+    "sha256": "2afb85b01428600a334418568714375c14cfa0541beb5963867e638e3446f75e",
     "bytes": 30646
   },
   {
     "path": "package.json",
-    "sha256": "2c55dbd600adb45e493b3f173e8c3859fd74b14798c9a9c0e0c18e06bc104716",
+    "sha256": "29a68cdf5a005f702c4266075821a1f34fb76cb095896708986f59ddf8fed6af",
     "bytes": 833
   },
   {
     "path": "scripts/benchmark.mjs",
-    "sha256": "88cceac50ae1ab871089bfb79835af16404b04d9f9df9bf851c97a4e48f00417",
-    "bytes": 25427
+    "sha256": "7c13e88121e79c7d9f286ef133a36d2b874d227604e01e27f848c38cd92aa810",
+    "bytes": 31277
   },
   {
     "path": "scripts/build-release.mjs",
-    "sha256": "90e20ba230ccdb3a13e5a8a6ecdf73c7275fc97e2d7fa2f718debbca2f7d872d",
-    "bytes": 2177
+    "sha256": "807f6ec635672052673fec65c425b868cb1c23bab4d37ba984b446958e165393",
+    "bytes": 2196
   },
   {
     "path": "scripts/cli.mjs",
-    "sha256": "16f98efe21fabb8b21f89e0af949166115957930dd64f9b851af2a146aaa2d7a",
-    "bytes": 15795
+    "sha256": "898e7b87cbdd4c5e1fb74faca4d6cde6e870568a0f337f183cf9eb733bd9c32e",
+    "bytes": 33610
   },
   {
     "path": "scripts/selftest.mjs",
-    "sha256": "412360aaa7fd7493721ef75d81354d0ad58c9b5df75851c75df07afd80f627b1",
-    "bytes": 2547
+    "sha256": "a716f0a23541dc8a84b5c430307b4aab415925125db0ba468107a746514a63e0",
+    "bytes": 2877
   },
   {
     "path": "setup.sh",
@@ -171,8 +181,13 @@
   },
   {
     "path": "tests/network.test.mjs",
-    "sha256": "f016a97705d909538eecdd82f5e822d08a6befc6120365afaaf9fb62c3d973f8",
-    "bytes": 4910
+    "sha256": "9696570cde1194093f998ee07b7efbcce5f4f42ba1db9c16ad66bb76889f79a8",
+    "bytes": 5029
+  },
+  {
+    "path": "tests/tcp-buffer.test.mjs",
+    "sha256": "57e59ff065c95ed47bcd8e5acf17583998b2741cf7692300e0a844f61b4671f5",
+    "bytes": 7528
   },
   {
     "path": "uninstall.sh",

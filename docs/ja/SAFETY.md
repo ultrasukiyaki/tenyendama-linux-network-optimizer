@@ -21,3 +21,7 @@
 - `/etc/systemd/system/tenyendama-netopt.service`
 
 `sysctl --system`実行後、物理NICへ`tc qdisc replace`を行い、実効値を検証します。
+
+TCPバッファ探索は明示指定時だけ実行します。固定されたソケット単位上限だけを対象とし、`tcp_mem`、default値、window scaling、`netdev_max_backlog`は変更しません。候補は現在値を下げず4～256MiBの上限内とし、各測定後に全項目を復元します。highperformanceが変更するのは重みだけで、プロトコル・経路・遅延・変動・確認・バックアップ・承認条件を回避できません。
+
+帯域、遅延、スパイク、変動の値が欠落または非有限の場合は失格です。背景通信検査の不合格はCC/qdisc確認とTCPバッファ確認の両方へ反映します。`status`はカーネル実効値を表示し、管理値との差異を警告します。

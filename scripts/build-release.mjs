@@ -12,13 +12,13 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const version = "3.0.1";
+const version = "3.1.0";
 const archiveName = `tenyendama-linux-network-optimizer-v${version}.zip`;
 const dist = join(root, "dist");
 const archive = join(dist, archiveName);
 const roots = [
   "package.json", "package-lock.json", "README.md", "README.ja.md", "LICENSE",
-  "CHANGELOG.md", "SECURITY.md", "THIRD-PARTY-NOTICES.md", "MANIFEST.json",
+  "CHANGELOG.md", "CHANGELOG.ja.md", "SECURITY.md", "THIRD-PARTY-NOTICES.md", "MANIFEST.json",
   "setup.sh", "uninstall.sh", "index.html", "bin", "src", "lib", "scripts",
   "docs/en", "docs/ja", "tests",
 ];
