@@ -1,0 +1,27 @@
+{
+  "name": "tenyendama-linux-network-optimizer",
+  "version": "3.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Safety-first Linux network benchmarking and auto-tuning with two-stage verification and rollback.",
+  "scripts": {
+    "start": "node scripts/cli.mjs",
+    "check": "node scripts/cli.mjs check",
+    "benchmark": "node scripts/cli.mjs benchmark",
+    "optimize": "node scripts/cli.mjs optimize",
+    "status": "node scripts/cli.mjs status",
+    "recover": "node scripts/cli.mjs recover",
+    "test": "node --test tests/*.test.mjs",
+    "selftest": "node scripts/selftest.mjs",
+    "release": "node scripts/build-release.mjs"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@cloudflare/speedtest": "1.12.1",
+    "playwright": "1.62.0",
+    "vite": "8.1.5"
+  },
+  "license": "MIT"
+}

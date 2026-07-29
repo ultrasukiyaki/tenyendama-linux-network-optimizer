@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+STATE_ROOT="/var/lib/tenyendama-netopt"
+BACKUP_ROOT="$STATE_ROOT/backups"
+CURRENT_POINTER="$STATE_ROOT/current"
+CONFIG_DIR="/etc/tenyendama-netopt"
+CURRENT_ENV="$CONFIG_DIR/current.env"
+APPLY_SCRIPT="/usr/local/libexec/tenyendama-netopt-apply"
+SERVICE_FILE="/etc/systemd/system/tenyendama-netopt.service"
+SYSCTL_DIR="/etc/sysctl.d"
+SYSCTL_PREFIX="99-tenyendama-customized-"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tenyendama-netopt-helper probe reno|cubic|bbr
+  tenyendama-netopt-helper apply IFACE reno|cubic|bbr fq|fq_codel
+  tenyendama-netopt-helper restore IFACE reno|cubic|bbr fq|fq_codel
+  tenyendama-netopt-helper persist IFACE reno|cubic|bbr fq|fq_codel
+  tenyendama-netopt-helper rollback latest
+  tenyendama-netopt-helper uninstall
+  tenyendama-netopt-helper status IFACE
+EOF
+}
+
+validate_iface() {
+  local iface="$1"
+  [[ "$iface" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { echo "Invalid interface: $iface" >&2; exit 2; }
+  [[ -d "/sys/class/net/$iface" ]] || { echo "Interface does not exist: $iface" >&2; exit 2; }
+}
+validate_cc() { case "$1" in reno|cubic|bbr) ;; *) echo "Unsupported congestion control: $1" >&2; exit 2;; esac; }
+validate_qdisc() { case "$1" in fq|fq_codel) ;; *) echo "Unsupported qdisc: $1" >&2; exit 2;; esac; }
+
+probe_cc() {
+  local cc="$1"
+  validate_cc "$cc"
+  [[ "$cc" == "bbr" ]] && modprobe tcp_bbr
+  local available
+  available="$(sysctl -n net.ipv4.tcp_available_congestion_control)"
+  grep -qw "$cc" <<<"$available" || {
+    echo "$cc is unavailable: $available" >&2
+    return 3
+  }
+  printf 'available=%s\n' "$cc"
+}
+
+PERSIST_ROLLBACK_ID=""
+persist_failure() {
+  local code="$?"
+  trap - ERR
+  echo "Persistence failed; restoring the pre-change state..." >&2
+  set +e
+  [[ -n "$PERSIST_ROLLBACK_ID" ]] && rollback_id "$PERSIST_ROLLBACK_ID"
+  set -e
+  exit "$code"
+}
+
+apply_profile() {
+  local iface="$1" cc="$2" qdisc="$3"
+  validate_iface "$iface"; validate_cc "$cc"; validate_qdisc "$qdisc"
+  [[ "$cc" == "bbr" ]] && modprobe tcp_bbr
+  local available actual_cc actual_qdisc
+  available="$(sysctl -n net.ipv4.tcp_available_congestion_control)"
+  grep -qw "$cc" <<<"$available" || { echo "$cc is unavailable: $available" >&2; exit 3; }
+  sysctl -w "net.ipv4.tcp_congestion_control=$cc"
+  tc qdisc replace dev "$iface" root "$qdisc"
+  actual_cc="$(sysctl -n net.ipv4.tcp_congestion_control)"
+  actual_qdisc="$(tc qdisc show dev "$iface" | awk 'NR == 1 {print $2}')"
+  [[ "$actual_cc" == "$cc" ]] || { echo "CC verification failed" >&2; exit 4; }
+  [[ "$actual_qdisc" == "$qdisc" ]] || { echo "qdisc verification failed: $actual_qdisc" >&2; exit 4; }
+}
+
+backup_path() {
+  local backup="$1" path="$2"
+  [[ -e "$path" || -L "$path" ]] || return 0
+  mkdir -p "$backup/files$(dirname "$path")"
+  cp -a "$path" "$backup/files$path"
+  printf '%s\n' "$path" >> "$backup/managed-files.list"
+}
+
+write_apply_script() {
+  install -d -m 0755 "$(dirname "$APPLY_SCRIPT")"
+  local tmp
+  tmp="$(mktemp)"
+  cat >"$tmp" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source /etc/tenyendama-netopt/current.env
+[[ "$TENYENDAMA_CC" == "bbr" ]] && modprobe tcp_bbr
+for _ in $(seq 1 30); do
+  [[ -d "/sys/class/net/$TENYENDAMA_IFACE" ]] && break
+  sleep 1
+done
+[[ -d "/sys/class/net/$TENYENDAMA_IFACE" ]]
+sysctl -w "net.ipv4.tcp_congestion_control=$TENYENDAMA_CC"
+tc qdisc replace dev "$TENYENDAMA_IFACE" root "$TENYENDAMA_QDISC"
+EOF
+  install -m 0755 "$tmp" "$APPLY_SCRIPT"
+  rm -f "$tmp"
+}
+
+write_service() {
+  local tmp
+  tmp="$(mktemp)"
+  cat >"$tmp" <<EOF
+[Unit]
+Description=Tenyendama Linux Network Optimizer profile
+Wants=network-online.target
+After=network-online.target NetworkManager.service
+ConditionPathExists=$CURRENT_ENV
+
+[Service]
+Type=oneshot
+ExecStart=$APPLY_SCRIPT
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  install -m 0644 "$tmp" "$SERVICE_FILE"
+  rm -f "$tmp"
+}
+
+persist_profile() {
+  local iface="$1" cc="$2" qdisc="$3"
+  validate_iface "$iface"; validate_cc "$cc"; validate_qdisc "$qdisc"
+  command -v systemctl >/dev/null || { echo "systemd is required for persistence" >&2; exit 5; }
+  [[ -d /run/systemd/system ]] || { echo "systemd is not active" >&2; exit 5; }
+
+  local id backup previous_cc previous_qdisc previous_current sysctl_file
+  id="$(date -u +%Y%m%d-%H%M%S)"
+  backup="$BACKUP_ROOT/$id"
+  [[ ! -e "$backup" ]] || { id="$id-$$"; backup="$BACKUP_ROOT/$id"; }
+  install -d -m 0755 "$STATE_ROOT" "$BACKUP_ROOT"
+  install -d -m 0700 "$backup"
+  : > "$backup/managed-files.list"
+
+  previous_cc="$(sysctl -n net.ipv4.tcp_congestion_control)"
+  previous_qdisc="$(tc qdisc show dev "$iface" | awk 'NR == 1 {print $2}')"
+  previous_current=""
+  [[ -f "$CURRENT_POINTER" ]] && previous_current="$(cat "$CURRENT_POINTER")"
+
+  backup_path "$backup" "$CURRENT_ENV"
+  backup_path "$backup" "$APPLY_SCRIPT"
+  backup_path "$backup" "$SERVICE_FILE"
+  while IFS= read -r old; do backup_path "$backup" "$old"; done < <(find "$SYSCTL_DIR" -maxdepth 1 -type f -name "${SYSCTL_PREFIX}*.conf" -print | sort)
+
+  local previous_service_enabled previous_service_active
+  previous_service_enabled="$(systemctl is-enabled tenyendama-netopt.service 2>/dev/null || true)"
+  previous_service_active="$(systemctl is-active tenyendama-netopt.service 2>/dev/null || true)"
+
+  {
+    printf 'BACKUP_ID=%q\n' "$id"
+    printf 'IFACE=%q\n' "$iface"
+    printf 'ORIGINAL_CC=%q\n' "$previous_cc"
+    printf 'ORIGINAL_QDISC=%q\n' "$previous_qdisc"
+    printf 'PREVIOUS_CURRENT_ID=%q\n' "$previous_current"
+    printf 'PREVIOUS_SERVICE_ENABLED=%q\n' "$previous_service_enabled"
+    printf 'PREVIOUS_SERVICE_ACTIVE=%q\n' "$previous_service_active"
+  } > "$backup/manifest.env"
+  chmod 0600 "$backup/manifest.env"
+  PERSIST_ROLLBACK_ID="$id"
+  trap persist_failure ERR
+
+  systemctl disable --now tenyendama-netopt.service >/dev/null 2>&1 || true
+  find "$SYSCTL_DIR" -maxdepth 1 -type f -name "${SYSCTL_PREFIX}*.conf" -delete
+  install -d -m 0755 "$CONFIG_DIR"
+  sysctl_file="$SYSCTL_DIR/${SYSCTL_PREFIX}${id}.conf"
+  cat > "$sysctl_file" <<EOF
+# Generated by Tenyendama Linux Network Optimizer v3.0.1
+# Backup ID: $id
+# Physical interface: $iface
+net.core.default_qdisc = $qdisc
+net.ipv4.tcp_congestion_control = $cc
+EOF
+  chmod 0644 "$sysctl_file"
+
+  {
+    printf 'TENYENDAMA_IFACE=%q\n' "$iface"
+    printf 'TENYENDAMA_CC=%q\n' "$cc"
+    printf 'TENYENDAMA_QDISC=%q\n' "$qdisc"
+    printf 'TENYENDAMA_SYSCTL_FILE=%q\n' "$sysctl_file"
+    printf 'TENYENDAMA_BACKUP_ID=%q\n' "$id"
+  } > "$CURRENT_ENV"
+  chmod 0644 "$CURRENT_ENV"
+  write_apply_script
+  write_service
+
+  systemctl daemon-reload
+  sysctl --system
+  apply_profile "$iface" "$cc" "$qdisc"
+  systemctl enable --now tenyendama-netopt.service
+  printf '%s\n' "$id" > "$CURRENT_POINTER"
+  chmod 0644 "$CURRENT_POINTER"
+  trap - ERR
+  PERSIST_ROLLBACK_ID=""
+
+  printf 'backup_id=%s\n' "$id"
+  printf 'sysctl_file=%s\n' "$sysctl_file"
+  printf 'profile=%s-%s\n' "$cc" "$qdisc"
+}
+
+restore_files_from_backup() {
+  local backup="$1" path source
+  [[ -f "$backup/managed-files.list" ]] || return 0
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    source="$backup/files$path"
+    [[ -e "$source" || -L "$source" ]] || continue
+    mkdir -p "$(dirname "$path")"
+    cp -a "$source" "$path"
+  done < "$backup/managed-files.list"
+}
+
+rollback_id() {
+  local id="$1" backup
+  backup="$BACKUP_ROOT/$id"
+  [[ -f "$backup/manifest.env" ]] || { echo "Backup not found: $id" >&2; exit 6; }
+  # shellcheck disable=SC1090
+  source "$backup/manifest.env"
+  validate_iface "$IFACE"; validate_cc "$ORIGINAL_CC"; validate_qdisc "$ORIGINAL_QDISC"
+
+  systemctl disable --now tenyendama-netopt.service >/dev/null 2>&1 || true
+  find "$SYSCTL_DIR" -maxdepth 1 -type f -name "${SYSCTL_PREFIX}*.conf" -delete
+  rm -f "$CURRENT_ENV" "$APPLY_SCRIPT" "$SERVICE_FILE"
+  restore_files_from_backup "$backup"
+  systemctl daemon-reload
+  sysctl --system
+  apply_profile "$IFACE" "$ORIGINAL_CC" "$ORIGINAL_QDISC"
+
+  if [[ -f "$SERVICE_FILE" ]]; then
+    [[ "$PREVIOUS_SERVICE_ENABLED" == "enabled" ]] && systemctl enable tenyendama-netopt.service >/dev/null
+    [[ "$PREVIOUS_SERVICE_ACTIVE" == "active" ]] && systemctl start tenyendama-netopt.service
+  fi
+
+  if [[ -n "$PREVIOUS_CURRENT_ID" ]]; then
+    printf '%s\n' "$PREVIOUS_CURRENT_ID" > "$CURRENT_POINTER"
+  else
+    rm -f "$CURRENT_POINTER"
+  fi
+  date -u +%FT%TZ > "$backup/rolled-back-at"
+  printf 'rolled_back=%s\n' "$id"
+  printf 'restored_profile=%s-%s\n' "$ORIGINAL_CC" "$ORIGINAL_QDISC"
+}
+
+rollback_latest() {
+  [[ -f "$CURRENT_POINTER" ]] || { echo "No active managed profile."; return 0; }
+  rollback_id "$(cat "$CURRENT_POINTER")"
+}
+
+uninstall_all() {
+  local guard=0
+  while [[ -f "$CURRENT_POINTER" ]]; do
+    rollback_latest
+    guard=$((guard + 1))
+    (( guard < 32 )) || { echo "Rollback chain is unexpectedly long" >&2; exit 7; }
+  done
+  systemctl disable --now tenyendama-netopt.service >/dev/null 2>&1 || true
+  find "$SYSCTL_DIR" -maxdepth 1 -type f -name "${SYSCTL_PREFIX}*.conf" -delete
+  rm -f "$CURRENT_ENV" "$APPLY_SCRIPT" "$SERVICE_FILE"
+  rmdir "$CONFIG_DIR" 2>/dev/null || true
+  systemctl daemon-reload
+  sysctl --system
+  echo "Managed configuration removed. Backups remain in $BACKUP_ROOT"
+}
+
+status_profile() {
+  local iface="$1"; validate_iface "$iface"
+  printf 'iface=%s\n' "$iface"
+  printf 'cc=%s\n' "$(sysctl -n net.ipv4.tcp_congestion_control)"
+  printf 'available_cc=%s\n' "$(sysctl -n net.ipv4.tcp_available_congestion_control)"
+  printf 'qdisc=%s\n' "$(tc qdisc show dev "$iface" | awk 'NR == 1 {print $2}')"
+  [[ -f "$CURRENT_POINTER" ]] && printf 'managed_backup=%s\n' "$(cat "$CURRENT_POINTER")" || printf 'managed_backup=none\n'
+  [[ -f "$CURRENT_ENV" ]] && cat "$CURRENT_ENV"
+}
+
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "This helper must run as root." >&2; exit 1; }
+command -v flock >/dev/null || { echo "flock is required." >&2; exit 1; }
+install -d -m 0755 /run/lock
+exec 9>/run/lock/tenyendama-netopt.lock
+flock -n 9 || { echo "Another network profile operation is active." >&2; exit 8; }
+action="${1:-}"
+case "$action" in
+  probe) [[ $# -eq 2 ]] || { usage >&2; exit 2; }; probe_cc "$2" ;;
+  apply|restore) [[ $# -eq 4 ]] || { usage >&2; exit 2; }; apply_profile "$2" "$3" "$4" ;;
+  persist) [[ $# -eq 4 ]] || { usage >&2; exit 2; }; persist_profile "$2" "$3" "$4" ;;
+  rollback) [[ $# -eq 2 && "$2" == "latest" ]] || { usage >&2; exit 2; }; rollback_latest ;;
+  uninstall) [[ $# -eq 1 ]] || { usage >&2; exit 2; }; uninstall_all ;;
+  status) [[ $# -eq 2 ]] || { usage >&2; exit 2; }; status_profile "$2" ;;
+  *) usage >&2; exit 2 ;;
+esac
