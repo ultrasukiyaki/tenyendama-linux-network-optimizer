@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-headless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Headless Chromium without a GUI session
+        run: |
+          env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE npm run test:headless
+          if command -v pgrep >/dev/null 2>&1; then
+            ! pgrep -x Xvfb
+          fi
+      - run: npm test
+      - run: npm run selftest
+
+  minimal-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: node:20-bookworm-slim
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned dependencies and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          chmod -R a+rX /ms-playwright "$GITHUB_WORKSPACE"
+      - name: Smoke test as an unprivileged user
+        run: |
+          su node -c "cd '$GITHUB_WORKSPACE' && env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npm run test:headless"

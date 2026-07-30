@@ -40,8 +40,12 @@ If an old `/usr/bin/node` still wins, reload the shell, run `hash -r`, and repea
 
 ```bash
 npm install
-npx playwright install chromium
+npx playwright install --with-deps chromium
 ./setup.sh --check-only
 ```
 
-If Playwright reports missing OS libraries, follow its printed Linux dependency guidance. For proxy, certificate, PATH, or permission problems, confirm the active Node.js path and use a user-owned project directory.
+Alternatively, run `./setup.sh --with-browser-deps`. The `--check-only` option
+never installs npm packages, Chromium, or OS libraries. If Playwright reports
+missing OS libraries, follow its printed Linux dependency guidance. For proxy,
+certificate, PATH, or permission problems, confirm the active Node.js path and
+use a user-owned project directory.

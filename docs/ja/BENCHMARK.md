@@ -1,5 +1,11 @@
 # ベンチマーク設計
 
+ベンチマークは共通browser runtimeから、固定Playwright管理下Chromiumを
+明示的な`headless: true`で起動します。`check`とローカル専用headless
+smoke testも同じ起動経路を使用します。レポートにはversionと
+launch/local-page/CDP結果を記録しますが、ホームディレクトリを含む
+実行ファイルpathやdisplay環境変数の値は保存しません。
+
 ## 探索
 
 標準候補：

@@ -199,7 +199,6 @@ const benchmarkArgsFromOptimize = (options, outputDir, profiles, preset, seed, p
   ];
   args.push(profileFile ? "--profile-file" : "--profiles", profileFile || profiles.join(","));
   if (preset === "confirmation") args.push("--min-decision-runs", "4");
-  if (options.headed) args.push("--headed");
   if (options.backgroundAction) {
     args.push("--background-action", options.backgroundAction);
   }
@@ -216,7 +215,6 @@ const parseOptimizeArgs = (argv) => {
     mode: "balanced",
     profiles: ["cubic-fq", "bbr-fq", "cubic-fq_codel"],
     minScoreGap: 2,
-    headed: false,
     yes: false,
     seed: Date.now() >>> 0,
     backgroundAction: "prompt",
@@ -240,7 +238,6 @@ const parseOptimizeArgs = (argv) => {
       case "--seed": options.seed = Number(need(arg, next)) >>> 0; index += 1; break;
       case "--background-action": options.backgroundAction = need(arg, next); index += 1; break;
       case "--background-threshold": options.backgroundThreshold = Number(need(arg, next)); index += 1; break;
-      case "--headed": options.headed = true; break;
       case "--yes": options.yes = true; break;
       case "--tune-buffers": options.tuneBuffers = true; break;
       case "--buffer-cap-mib":
@@ -363,7 +360,7 @@ const optimize = async (argv) => {
     profileCount: 2,
     ...PRESET_TRANSFER.confirmation,
   });
-  console.log("Tenyendama Linux Network Optimizer v3.1.0");
+  console.log("Tenyendama Linux Network Optimizer v3.2.0");
   console.log(`Exploration profiles: ${options.profiles.join(", ")}`);
   console.log(
     `Estimated maximum transfer: ${formatBytes(approximateExploration + approximateConfirmation)}`
@@ -692,7 +689,7 @@ const interactive = async () => {
   }
   const rl = createInterface({ input, output });
   try {
-    console.log("Tenyendama Linux Network Optimizer v3.1.0");
+    console.log("Tenyendama Linux Network Optimizer v3.2.0");
     console.log("1. Check environment");
     console.log("2. Run benchmark only");
     console.log("3. Optimize with two-stage verification");
@@ -706,13 +703,13 @@ const interactive = async () => {
 };
 
 const helpText = `
-Tenyendama Linux Network Optimizer v3.1.0
+Tenyendama Linux Network Optimizer v3.2.0
 
 Usage:
   ./bin/tenyendama-netopt [command] [options]
 
 Commands:
-  check       Detect routing and physical interfaces without changing settings
+  check       Diagnose routing, physical interfaces, and headless Chromium without changes
   benchmark   Measure and rank profiles; never persists a result
   optimize    Explore, confirm, and optionally persist a verified winner
   report      Show the latest report, or a specified report path
@@ -735,7 +732,6 @@ Command-specific options:
   --iface auto|NAME           Select the physical egress interface
   --min-score-gap POINTS      Minimum score lead required for a winner (default: 2)
   --seed NUMBER               Reproduce randomized benchmark order
-  --headed                    Show Chromium during measurement
   --yes                       Skip prompts except the safety workflow itself
   --runs NUMBER               Override runs per profile (benchmark only)
   --cooldown SEC              Override delay between candidates
@@ -770,16 +766,23 @@ Examples:
 Safety notes:
   benchmark never persists. optimize requires exploration, confirmation,
   successful restoration, all safety gates, and explicit approval.
+  Chromium always runs headless; no X server, Wayland session, or Xvfb is needed.
 `;
 
 const main = async () => {
   await access(helper, fsConstants.X_OK);
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    console.warn(
+      "WARNING: Run the CLI as your normal login user when possible; "
+      + "only the allow-listed helper needs elevated privileges."
+    );
+  }
   let [command, ...args] = process.argv.slice(2);
   if (!command) command = await interactive();
   if (!command) return;
   switch (command) {
     case "help": case "--help": case "-h": console.log(helpText.trim()); break;
-    case "--version": case "version": console.log("3.1.0"); break;
+    case "--version": case "version": console.log("3.2.0"); break;
     case "check": await run(process.execPath, [benchmarkScript, "--check-only", ...args]); break;
     case "benchmark": await run(process.execPath, [benchmarkScript, ...args]); break;
     case "optimize": await optimize(args); break;

@@ -1,4 +1,4 @@
-# Tenyendama Linux Network Optimizer v3.1.0
+# Tenyendama Linux Network Optimizer v3.2.0
 
 [English README](README.md)
 
@@ -15,18 +15,42 @@ TCP輻輳制御とqdiscを実測比較し、明確に有利で安全性を確認
 - 探索と確認の二段階に合格し、ユーザーが承認した場合だけ永続化
 - 全安全条件を維持したまま帯域性能をより重視する`highperformance`モード
 - 実測BDPから生成したTCPソケットバッファ上限のオプション比較
+- Playwright管理下Chromiumの明示的headless起動とruntime診断
 
 ## 必要環境とセットアップ
 
 Linux、Node.js 20.19以上、npm/npx、`ip`、`tc`、`sysctl`、`sudo`、Playwright Chromiumが必要です。本製品が対応する最新のactive LTS版Node.jsを推奨します。
 
+GUI、X Window System、Wayland、Xvfbは不要です。Playwright Chromiumは
+明示的なheadlessモードで実行されます。ただし、Chromiumが使用する
+Linux共有ライブラリは必要です。SSHだけの環境で実行でき、`ssh -X`、
+`ssh -Y`によるGUI転送も不要です。
+
 [Node.js・npm導入ガイド](docs/ja/INSTALL-NODEJS.md)
 
 ```bash
 npm install
-npx playwright install chromium
+npx playwright install --with-deps chromium
 ./setup.sh --check-only
+./bin/tenyendama-netopt check
 ```
+
+CLI本体、npm、Playwright Chromiumは通常ログインユーザーで実行してください。
+特権が必要なネットワーク操作だけを既存root helperが担当します。CLI全体を
+`sudo`で起動することは推奨しません。`benchmark`はSSH端末から実行できますが、
+headless対応と無人実行は同義ではなく、`optimize`の永続化には従来どおり
+対話確認が必要です。
+
+対応状況：
+
+| 区分 | 環境 |
+|---|---|
+| 本プロジェクトで検証 | Linux Mint 22.3 x86_64 |
+| 固定Playwright版で対応 | Playwright 1.62.0が公式対応するLinux |
+| best effort / 未検証 | その他のglibc Linux。Alpine/muslはv3.2.0正式対応外 |
+
+Ubuntu 24.04と非root Debian 12 slim container向けCIを構成済みです。workflowが
+完走した時点で本プロジェクトの検証済み環境として扱います。
 
 ## 使い方
 
@@ -39,7 +63,7 @@ npx playwright install chromium
 ./bin/tenyendama-netopt rollback
 ```
 
-詳しくは[ベンチマーク設計](docs/ja/BENCHMARK.md)、[安全設計](docs/ja/SAFETY.md)、[トラブルシューティング](docs/ja/TROUBLESHOOTING.md)を参照してください。
+詳しくは[ヘッドレス動作](docs/ja/HEADLESS.md)、[ベンチマーク設計](docs/ja/BENCHMARK.md)、[安全設計](docs/ja/SAFETY.md)、[トラブルシューティング](docs/ja/TROUBLESHOOTING.md)を参照してください。
 
 オプションのTCPバッファ探索では、実測した帯域遅延積から安全なソケット単位の自動調整上限を比較します。システム全体の`tcp_mem`と`netdev_max_backlog`は診断対象のみで、自動変更しません。モード指定だけで有効になることはありません。
 

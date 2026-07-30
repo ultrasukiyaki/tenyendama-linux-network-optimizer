@@ -2,6 +2,18 @@
 
 [English Changelog](CHANGELOG.md)
 
+## 3.2.0
+
+- デスクトップ環境、Xorg、Wayland、`DISPLAY`、XvfbなしのLinux headless動作を正式機能にしました。
+- ベンチマークとsmoke testのChromium起動を共通化し、`headless: true`を明示しました。
+- ローカルページ、JavaScript、CDP Networkを確認する外部通信なしのsmoke testを追加しました。
+- `check`と`setup.sh --check-only`へ非破壊のbrowser runtime診断を追加しました。
+- Playwright/Chromium不足、共有ライブラリ、権限、キャッシュ所有権、非対応環境、timeout、ローカルページ、CDPのエラー分類を追加しました。
+- `setup.sh --with-browser-deps`を追加しました。
+- JSON・Markdownレポートへプライバシーに配慮したbrowser runtime情報を追加しました。
+- GUIなしUbuntuと最小DebianコンテナのCIを追加しました。
+- 日英HEADLESSドキュメントを追加しました。
+
 ## 3.1.0
 
 - `current`、`bdp-2x`、`bdp-4x`候補を使用する、実測BDP由来のTCPソケットバッファ上限の探索・確認機能をオプトインで追加しました。

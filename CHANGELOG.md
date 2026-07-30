@@ -2,6 +2,22 @@
 
 [日本語版 Changelog](CHANGELOG.ja.md)
 
+## 3.2.0
+
+- Formally supports headless Linux operation without a desktop environment,
+  Xorg, Wayland, `DISPLAY`, or Xvfb.
+- Unified benchmark and smoke-test Chromium startup with explicit
+  `headless: true`.
+- Added local-only page, JavaScript, and CDP Network smoke tests.
+- Expanded `check` and `setup.sh --check-only` with non-destructive browser
+  runtime diagnostics.
+- Classifies missing Playwright/Chromium, shared libraries, permissions,
+  cache ownership, unsupported platforms, timeouts, local-page, and CDP errors.
+- Added `setup.sh --with-browser-deps`.
+- Added privacy-safe browser runtime fields to JSON and Markdown reports.
+- Added GUI-free Ubuntu and minimal Debian container CI jobs.
+- Added English and Japanese headless-operation documentation.
+
 ## 3.1.0
 
 - Added opt-in BDP-derived TCP socket-buffer ceiling exploration and

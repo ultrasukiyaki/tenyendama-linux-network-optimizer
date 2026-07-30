@@ -32,6 +32,13 @@ import { balancedOrder, createSeededRandom, shuffled } from "../lib/stats.mjs";
 import { PROFILE_REGISTRY } from "../lib/optimizer.mjs";
 import { MODE_DESCRIPTIONS, MODE_REGISTRY, normalizeMode } from "../lib/stats.mjs";
 import { validateBufferProfile } from "../lib/tcp-buffer.mjs";
+import {
+  collectBrowserRuntimeInfo,
+  formatBrowserRuntimeError,
+  launchBenchmarkChromium,
+  probeHeadlessChromium,
+  sanitizeBrowserRuntimeInfo,
+} from "../lib/playwright-runtime.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDirectory, "..");
@@ -82,7 +89,6 @@ const parseArguments = (argv) => {
     mode: "balanced",
     profiles: ["cubic-fq", "bbr-fq"],
     profileFile: null,
-    headless: true,
     helper: defaultHelper,
     port: 4173,
     warmup: true,
@@ -145,9 +151,6 @@ const parseArguments = (argv) => {
       case "--seed":
         options.seed = Number(requireValue(argument, next)) >>> 0;
         index += 1;
-        break;
-      case "--headed":
-        options.headless = false;
         break;
       case "--no-warmup":
         options.warmup = false;
@@ -234,7 +237,7 @@ const parseArguments = (argv) => {
 };
 
 const helpText = `
-Tenyendama Linux Network Optimizer v3.1.0 — Benchmark Engine v0.3.0
+Tenyendama Linux Network Optimizer v3.2.0 — Benchmark Engine v0.4.0
 
 Usage:
   ./bin/tenyendama-netbench --preset standard --mode balanced
@@ -247,7 +250,6 @@ Options:
   --runs NUMBER                Override measured runs per profile
   --cooldown SEC               Override delay between tests
   --seed NUMBER                Reproduce the randomized order
-  --headed                     Show Chromium
   --min-score-gap POINTS       Minimum lead required to declare a winner (default: 2)
   --min-decision-runs NUMBER    Minimum measured runs needed for a decision
   --output-dir PATH             Write results to an explicit directory
@@ -423,6 +425,9 @@ const main = async () => {
     "net.ipv4.tcp_congestion_control",
   ]);
   const originalQdisc = await qdiscKind(physicalIface);
+  const browserRuntime = sanitizeBrowserRuntimeInfo(
+    await probeHeadlessChromium()
+  );
 
   let profiles;
   if (options.profileFile) {
@@ -443,8 +448,8 @@ const main = async () => {
   await mkdir(stateDirectory, { recursive: true });
 
   const environment = {
-    version: "3.1.0",
-    benchmarkEngineVersion: "0.3.0",
+    version: "3.2.0",
+    benchmarkEngineVersion: "0.4.0",
     startedAt: new Date().toISOString(),
     routingIface,
     physicalIface,
@@ -455,6 +460,7 @@ const main = async () => {
     currentProfile: currentProfileKey,
     profiles,
     options,
+    browserRuntime,
     backgroundChecks: [],
     snapshot: await collectEnvironment({ routingIface, physicalIface }),
   };
@@ -487,6 +493,17 @@ const main = async () => {
   if (resolved.warning) console.warn(`WARNING: ${resolved.warning}`);
 
   if (options.checkOnly) {
+    console.log("\nBrowser runtime");
+    console.log("  Mode:                 headless");
+    console.log("  X server required:    no");
+    console.log(`  DISPLAY present:      ${browserRuntime.displayEnvironmentPresent ? "yes" : "no"} (OK)`);
+    console.log(`  WAYLAND_DISPLAY:      ${browserRuntime.waylandEnvironmentPresent ? "yes" : "no"} (OK)`);
+    console.log(`  Playwright:           ${browserRuntime.playwrightVersion}`);
+    console.log(`  Chromium:             ${browserRuntime.browserVersion}`);
+    console.log(`  Executable:           ${browserRuntime.executableAvailable ? "available" : "unavailable"}`);
+    console.log(`  Launch test:          ${browserRuntime.launchProbe}`);
+    console.log(`  Local page test:      ${browserRuntime.localPageProbe}`);
+    console.log(`  CDP test:             ${browserRuntime.cdpProbe}`);
     console.log(`Environment snapshot: ${outputDirectory}/environment.json`);
     if (!["reno", "cubic", "bbr"].includes(originalCc)) {
       console.warn(`WARNING: benchmark restore does not support CC ${originalCc}`);
@@ -556,6 +573,9 @@ const main = async () => {
 
   let viteServer;
   let browser;
+  let browserContext;
+  let browserPage;
+  let browserCdp;
   let restored = false;
   let signalReceived = null;
 
@@ -605,10 +625,7 @@ const main = async () => {
   process.once("SIGHUP", () => signalHandler("SIGHUP"));
 
   try {
-    const [{ chromium }, { createServer }] = await Promise.all([
-      import("playwright"),
-      import("vite"),
-    ]);
+    const { createServer } = await import("vite");
     viteServer = await createServer({
       root: projectRoot,
       logLevel: "error",
@@ -616,30 +633,33 @@ const main = async () => {
     });
     await viteServer.listen();
 
-    browser = await chromium.launch({
-      headless: options.headless,
-      args: ["--disable-quic"],
-    });
-    const context = await browser.newContext({ serviceWorkers: "block" });
-    const page = await context.newPage();
-    page.setDefaultTimeout(360_000);
-    await page.goto(`http://127.0.0.1:${options.port}/`, {
+    browser = await launchBenchmarkChromium();
+    const actualRuntime = await collectBrowserRuntimeInfo();
+    actualRuntime.browserVersion = browser.version();
+    actualRuntime.launchProbe = "pass";
+    environment.browserRuntime = sanitizeBrowserRuntimeInfo(actualRuntime);
+    browserContext = await browser.newContext({ serviceWorkers: "block" });
+    browserPage = await browserContext.newPage();
+    browserPage.setDefaultTimeout(360_000);
+    await browserPage.goto(`http://127.0.0.1:${options.port}/`, {
       waitUntil: "networkidle",
     });
 
-    const cdp = await context.newCDPSession(page);
-    await cdp.send("Network.enable");
+    browserCdp = await browserContext.newCDPSession(browserPage);
+    await browserCdp.send("Network.enable");
+    environment.browserRuntime.cdpProbe = "pass";
+    environment.browserRuntime.localPageProbe = "pass";
     const requestMethods = new Map();
     let captureActive = false;
     let capturedProtocols = [];
 
-    cdp.on("Network.requestWillBeSent", (event) => {
+    browserCdp.on("Network.requestWillBeSent", (event) => {
       requestMethods.set(event.requestId, {
         method: event.request.method,
         url: event.request.url,
       });
     });
-    cdp.on("Network.responseReceived", (event) => {
+    browserCdp.on("Network.responseReceived", (event) => {
       if (!captureActive) return;
       const url = event.response.url || requestMethods.get(event.requestId)?.url || "";
       if (!/\/__(?:down|up)(?:[/?#]|$)/.test(url)) return;
@@ -674,11 +694,11 @@ const main = async () => {
     };
 
     const runMeasurement = async (measurementOptions) => {
-      await page.reload({ waitUntil: "networkidle" });
+      await browserPage.reload({ waitUntil: "networkidle" });
       capturedProtocols = [];
       captureActive = true;
       try {
-        const raw = await page.evaluate(async (browserOptions) => {
+        const raw = await browserPage.evaluate(async (browserOptions) => {
           if (typeof window.runTenyendamaSpeedTest !== "function") {
             throw new Error("Browser benchmark function is unavailable");
           }
@@ -891,6 +911,9 @@ const main = async () => {
     console.log(`\nResults: ${outputDirectory}`);
   } finally {
     await restore();
+    if (browserCdp) await browserCdp.detach().catch(() => {});
+    if (browserPage) await browserPage.close().catch(() => {});
+    if (browserContext) await browserContext.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
     if (viteServer) await viteServer.close().catch(() => {});
   }
@@ -907,6 +930,10 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error(`\nERROR: ${error.stack || error.message}`);
+  console.error(
+    error.browserClassification
+      ? `\n${formatBrowserRuntimeError(error.browserClassification)}`
+      : `\nERROR: ${error.stack || error.message}`
+  );
   process.exitCode = 1;
 });

@@ -92,15 +92,20 @@ sudo apt remove nodejs npm
 ## ツールのセットアップ
 
 ```bash
+npm install
+npx playwright install --with-deps chromium
 ./setup.sh --check-only
-./setup.sh
 ```
 
-Playwright Chromiumのみを後から入れる場合：
+セットアップからChromiumとLinux依存ライブラリを導入する場合：
 
 ```bash
-npx playwright install chromium
+./setup.sh --with-browser-deps
 ```
+
+`--check-only`はnpm package、Chromium、OS共有ライブラリ、設定を変更しません。
+CLI、npm、Playwrightは通常ユーザーで実行し、`sudo npm`や`sudo npx`は
+使用しないでください。
 
 ## Current版について
 

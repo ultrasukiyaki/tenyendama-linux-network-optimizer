@@ -12,7 +12,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const version = "3.1.0";
+const version = "3.2.0";
 const archiveName = `tenyendama-linux-network-optimizer-v${version}.zip`;
 const dist = join(root, "dist");
 const archive = join(dist, archiveName);

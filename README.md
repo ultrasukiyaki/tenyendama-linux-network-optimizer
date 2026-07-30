@@ -1,4 +1,4 @@
-# Tenyendama Linux Network Optimizer v3.1.0
+# Tenyendama Linux Network Optimizer v3.2.0
 
 [日本語版 README](README.ja.md)
 
@@ -16,18 +16,42 @@ A safety-first Linux network benchmarking and tuning tool. It compares TCP conge
 - Requires a second confirmation stage and explicit approval before persistence
 - Adds `highperformance`, which gives throughput more scoring weight without relaxing any safety gate
 - Optionally compares measured BDP-derived per-socket TCP buffer ceilings
+- Runs Playwright-managed Chromium explicitly in headless mode and diagnoses its runtime
 
 ## Requirements and setup
 
 Linux, Node.js 20.19 or newer, npm/npx, `ip`, `tc`, `sysctl`, `sudo`, and Playwright Chromium are required. The latest active Node.js LTS supported by this project is recommended.
 
+No desktop environment, X Window System, Wayland session, or Xvfb is required.
+Playwright Chromium is launched explicitly in headless mode. The Linux shared
+libraries required by Chromium must still be installed. SSH X forwarding
+(`ssh -X` / `ssh -Y`) is unnecessary.
+
 See [Node.js installation](docs/en/INSTALL-NODEJS.md).
 
 ```bash
 npm install
-npx playwright install chromium
+npx playwright install --with-deps chromium
 ./setup.sh --check-only
+./bin/tenyendama-netopt check
 ```
+
+Run the CLI, npm, and Playwright installation as your normal login user. Only
+the allow-listed helper performs required privileged network operations; do
+not launch the entire CLI with `sudo`. `benchmark` works from an SSH terminal.
+Headless operation does not make `optimize` unattended: its existing
+persistence confirmation remains interactive.
+
+Platform status:
+
+| Status | Environments |
+|---|---|
+| Tested by this project | Linux Mint 22.3 x86_64 |
+| Supported by the pinned Playwright version | Linux platforms supported by Playwright 1.62.0 |
+| Best effort / unverified | Other glibc Linux distributions; Alpine/musl is not a v3.2.0 support target |
+
+Automated CI is configured for Ubuntu 24.04 and an unprivileged Debian 12 slim
+container; those targets become project-tested when the workflow completes.
 
 ## Usage
 
@@ -78,7 +102,9 @@ The optional TCP buffer stage compares safe per-socket autotuning ceilings deriv
 
 Modes change scoring weights only. Route and protocol validation, HTTP/3/QUIC exclusion, loaded-latency and variability limits, confirmation runs, and the minimum score gap apply to every mode.
 
-More information: [benchmark design](docs/en/BENCHMARK.md), [safety](docs/en/SAFETY.md), and [troubleshooting](docs/en/TROUBLESHOOTING.md).
+More information: [headless operation](docs/en/HEADLESS.md),
+[benchmark design](docs/en/BENCHMARK.md), [safety](docs/en/SAFETY.md), and
+[troubleshooting](docs/en/TROUBLESHOOTING.md).
 
 ## License
 

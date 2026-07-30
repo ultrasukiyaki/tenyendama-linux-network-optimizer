@@ -1,13 +1,13 @@
 [
   {
     "path": "CHANGELOG.ja.md",
-    "sha256": "372e4d7b20e772c8effe60b82cb34c49142c94223344a7b8af404b2b815d529e",
-    "bytes": 3427
+    "sha256": "096da566cd90b4772eeee25a89d87b3154d8b4d2649247ab393308a8dd656a22",
+    "bytes": 4378
   },
   {
     "path": "CHANGELOG.md",
-    "sha256": "97ed4ceccfdeda6e1114abaf5a671b2c9bb2edc7bf8fc192807fb9841516647a",
-    "bytes": 2494
+    "sha256": "8aeb0f390071ec089edefa88b40c54706b6ad4790636d00a0318590355429988",
+    "bytes": 3261
   },
   {
     "path": "LICENSE",
@@ -16,18 +16,18 @@
   },
   {
     "path": "README.ja.md",
-    "sha256": "d0d7fc691988ec35dda639fca0199baabf670767f2a9b487737d59124460a12b",
-    "bytes": 4594
+    "sha256": "6a1de84a3cb274a83b9848e86da6cde0f710365a2bd1793dae1d2f178f88887b",
+    "bytes": 5957
   },
   {
     "path": "README.md",
-    "sha256": "76733130ca56b699098766856823cf4ecbd1ddffbd3cf06240e3e807872e89f9",
-    "bytes": 4661
+    "sha256": "1f5e80308dc4f0c54b8e06fc04052d3fb04ba027897bff010ab174a89e06f51e",
+    "bytes": 5919
   },
   {
     "path": "SECURITY.md",
-    "sha256": "1b3209c60622671a36faf5f84224f457c575986c652baa1b1fa6839c9b5452d5",
-    "bytes": 963
+    "sha256": "f55c35a90c0b7670b606834f57b19e2facaef0cbe0380955a86dcb65664ae5a5",
+    "bytes": 1304
   },
   {
     "path": "THIRD-PARTY-NOTICES.md",
@@ -41,13 +41,13 @@
   },
   {
     "path": "bin/tenyendama-netopt-helper",
-    "sha256": "ec9586816a5870283132fa1350edca2a7073b240a9e29d62107d286ee0119eb3",
+    "sha256": "d497cdfb40ea014f0a0dbebabc098e3772dd129834c7ec384097bab64a80ad47",
     "bytes": 18866
   },
   {
     "path": "docs/en/BENCHMARK.md",
-    "sha256": "161b9fdad77084c22a52860d53ba34fd423d4a4f9f7724f767986093c033083a",
-    "bytes": 2191
+    "sha256": "3c8573367732948873ca1182dbf358dbb727b8961109b1c78720bedf2e672f24",
+    "bytes": 2555
   },
   {
     "path": "docs/en/GITHUB.md",
@@ -55,29 +55,39 @@
     "bytes": 538
   },
   {
+    "path": "docs/en/HEADLESS.md",
+    "sha256": "da0f887770d5ea4f13e535b977596a1eb6766233b2b53aa0ba6831bb2cfcb8aa",
+    "bytes": 1410
+  },
+  {
     "path": "docs/en/INSTALL-NODEJS.md",
-    "sha256": "405ea36682b5bb59585ec4676b6ce4473637d0c863aeffd8495ddc57a3be482e",
-    "bytes": 1427
+    "sha256": "4857aba04fa4588988a1c166cab809c3646995e764da7fe724a253b2883d4013",
+    "bytes": 1574
   },
   {
     "path": "docs/en/RELEASE-CHECKLIST.md",
-    "sha256": "505b4eaedb802ec8b02f4bc479ab05b32b7a7b27c0e865a52a9fe369d809e9af",
-    "bytes": 510
+    "sha256": "692eaf25ca9329581586f1e974bcc37b7f55235e2d3187578c88c29f86170bd7",
+    "bytes": 751
+  },
+  {
+    "path": "docs/en/RELEASE-NOTES-v3.2.0.md",
+    "sha256": "1f410e74f9ee60b1792c68e9c5ce0fbce06094474e70a0c26cd527faf8d9052c",
+    "bytes": 891
   },
   {
     "path": "docs/en/SAFETY.md",
-    "sha256": "5f444e18c7a067e54fe385984da96453b933b200abad34f838aea2fb07fc212c",
-    "bytes": 1258
+    "sha256": "3d0ba843bc6bf67a4a231d8ff6d2d6e9fe11b7ceac68160782fc765b7f39b685",
+    "bytes": 1959
   },
   {
     "path": "docs/en/TROUBLESHOOTING.md",
-    "sha256": "7bc3dfadaf61703a1d47f0550ce99d16748059f753b616c4816ef530f4b8d071",
-    "bytes": 1023
+    "sha256": "7c91275b47f161348ab93466fe3619abdda267f5d58257f7976fd8dc62e0c290",
+    "bytes": 2349
   },
   {
     "path": "docs/ja/BENCHMARK.md",
-    "sha256": "145844503e6694b2e3655c609c38b4d3edb311c8af95d8cad5ec1ae2a0e53d4c",
-    "bytes": 2911
+    "sha256": "040bfd9acbb7ae996479de6c6c5652871c134980e520b58a86504e68bb8e23fc",
+    "bytes": 3330
   },
   {
     "path": "docs/ja/GITHUB.md",
@@ -85,24 +95,34 @@
     "bytes": 537
   },
   {
+    "path": "docs/ja/HEADLESS.md",
+    "sha256": "9866becc313667785be71cab3f08bdb275f59ecaff6d1f35ffd9972ec66b744a",
+    "bytes": 1539
+  },
+  {
     "path": "docs/ja/INSTALL-NODEJS.md",
-    "sha256": "ac0a0241e116e3a06628f343f1cf195ea5e2046e68e5b161b6653b86d715bec5",
-    "bytes": 2558
+    "sha256": "5b73677b7437d9cdd2d3223b9cb78b4cff8ccd3ef20cf0a8dab31d0c26fb99ec",
+    "bytes": 2851
   },
   {
     "path": "docs/ja/RELEASE-CHECKLIST.md",
-    "sha256": "f1817929efb1981225231d3810c067dc7c5889b1964e42def36092f4c98c54b7",
-    "bytes": 888
+    "sha256": "23e9e9d3bec9c15dc53dbfe7ff9378c876554efecd8c6fdd9bcf6929ea82175e",
+    "bytes": 1148
+  },
+  {
+    "path": "docs/ja/RELEASE-NOTES-v3.2.0.md",
+    "sha256": "e8590ccb9d13f4844ad6b52bbf62332b61253de5c7b5031f613b25e9897f72ab",
+    "bytes": 958
   },
   {
     "path": "docs/ja/SAFETY.md",
-    "sha256": "462f463405af5232a49f7534a1cdab77c808e6aab5d79a544bf8f8d56a3e250f",
-    "bytes": 2279
+    "sha256": "83aacafe349182cd9fdad119de65fc9bb4c55a0cc82906f1a32ce7214946ba30",
+    "bytes": 2996
   },
   {
     "path": "docs/ja/TROUBLESHOOTING.md",
-    "sha256": "a2e424b74d1ea14369733c7687c6254167d6e885f09fb8b6903b620b06c9a79b",
-    "bytes": 1214
+    "sha256": "e3ecd3a6ec2d7da9a14ac77d6d8000356c1409c456a3e20ccf659648e276a29c",
+    "bytes": 2668
   },
   {
     "path": "index.html",
@@ -125,9 +145,14 @@
     "bytes": 3654
   },
   {
+    "path": "lib/playwright-runtime.mjs",
+    "sha256": "122a0b57a08e95e14fe969ef8454f57100035934d9649841672966799df63b1b",
+    "bytes": 15689
+  },
+  {
     "path": "lib/report.mjs",
-    "sha256": "5407d51626a4964473ae979513c98b41f21fb3aa7a5267907f74b32c210b8072",
-    "bytes": 14648
+    "sha256": "4512adcf51e5bc003c237947a9942f8008beb7cac12be0b0d467817d6f6b3397",
+    "bytes": 15394
   },
   {
     "path": "lib/stats.mjs",
@@ -141,28 +166,33 @@
   },
   {
     "path": "package-lock.json",
-    "sha256": "2afb85b01428600a334418568714375c14cfa0541beb5963867e638e3446f75e",
+    "sha256": "8266082a0b7de62cf52742409eae6aec638da23151a7c0400d1742f851a9c358",
     "bytes": 30646
   },
   {
     "path": "package.json",
-    "sha256": "29a68cdf5a005f702c4266075821a1f34fb76cb095896708986f59ddf8fed6af",
-    "bytes": 833
+    "sha256": "a5f6195c7aca0499ae5b78469e0d7bc9ecdc2beb5e5820f08f11ae24e0594e2a",
+    "bytes": 894
   },
   {
     "path": "scripts/benchmark.mjs",
-    "sha256": "7c13e88121e79c7d9f286ef133a36d2b874d227604e01e27f848c38cd92aa810",
-    "bytes": 31277
+    "sha256": "9c576c7b3498ee7dd28f8bb6c7dad8aaba35ecc365ffdddb2e25c03a93bdf3d7",
+    "bytes": 32929
   },
   {
     "path": "scripts/build-release.mjs",
-    "sha256": "807f6ec635672052673fec65c425b868cb1c23bab4d37ba984b446958e165393",
+    "sha256": "2daeafe5e7cd043171d44fe72024dc58d5f470f263b4d6ea68915fba21ddb9a9",
     "bytes": 2196
   },
   {
     "path": "scripts/cli.mjs",
-    "sha256": "898e7b87cbdd4c5e1fb74faca4d6cde6e870568a0f337f183cf9eb733bd9c32e",
-    "bytes": 33610
+    "sha256": "6504294c143cfccb23e5f6e7e440b444bb1ccc7280f8d7e3ef8f11d6b084d30f",
+    "bytes": 33762
+  },
+  {
+    "path": "scripts/headless-smoke-test.mjs",
+    "sha256": "6c16d4c5295152a6915026e6bdf2a46738ad4d9012d07273200e09dc6d187bee",
+    "bytes": 1162
   },
   {
     "path": "scripts/selftest.mjs",
@@ -171,8 +201,8 @@
   },
   {
     "path": "setup.sh",
-    "sha256": "e01fd006e82e685fc7872edf4b17b9cd29a47af00094f8cb412fc8a81e9f8796",
-    "bytes": 2312
+    "sha256": "ccb382794027689006375ae2ba95ad86b7d69498ab7d32939c667a01a52296ab",
+    "bytes": 3780
   },
   {
     "path": "src/browser-bench.js",
@@ -180,9 +210,24 @@
     "bytes": 2935
   },
   {
+    "path": "tests/compatibility.test.mjs",
+    "sha256": "00238ff4fc6196a38610d2607c06fbc81b838d64813e5c5d1e592870af2f381d",
+    "bytes": 1427
+  },
+  {
     "path": "tests/network.test.mjs",
     "sha256": "9696570cde1194093f998ee07b7efbcce5f4f42ba1db9c16ad66bb76889f79a8",
     "bytes": 5029
+  },
+  {
+    "path": "tests/playwright-runtime.test.mjs",
+    "sha256": "61a9e74678b219670253b976cee4318c5f7eeabc9fd6b65ad448c013b740bf9f",
+    "bytes": 4476
+  },
+  {
+    "path": "tests/setup.test.mjs",
+    "sha256": "fb7872c058c01709d9fb0123019d3535c2f5f7aae946bd47f1198c18439e0092",
+    "bytes": 1726
   },
   {
     "path": "tests/tcp-buffer.test.mjs",

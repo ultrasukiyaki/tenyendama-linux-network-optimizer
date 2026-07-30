@@ -23,6 +23,41 @@ bridge、bond、VLAN、複数active slave環境では明示します。
 npx playwright install chromium
 ```
 
+CLIを実行するのと同じ通常ログインユーザーで実行してください。
+
+## Chromium用Linux共有ライブラリがない
+
+```bash
+npx playwright install --with-deps chromium
+```
+
+Playwrightの依存関係自動導入が非対応のdistributionでは、package名を推測して
+導入しないでください。OS・architectureと実際の起動errorを記録し、
+Playwright公式の依存関係案内を確認します。詳細ログ：
+
+```bash
+DEBUG=pw:browser ./bin/tenyendama-netopt check
+```
+
+## root所有browser cacheが疑われる
+
+npm、Playwright、CLIを通常ユーザーで実行したか確認し、そのユーザーで
+`npx playwright install chromium`を再実行してください。root所有でも現在
+ユーザーがread、execute、path traversalできれば正常です。広範囲の再帰
+`chown`は安易に行わないでください。
+
+## `Missing X server or $DISPLAY`
+
+v3.2.0はX serverを必要としません。このerrorはPlaywrightとbrowserの不一致、
+または誤ったheaded起動経路を示す可能性があります。Xvfbで回避する前に
+project versionと明示的headless runtimeを確認してください。
+
+## proxy・firewall環境
+
+Playwright browser download失敗とbenchmark HTTP通信失敗は別問題です。
+Playwright用download proxyと通常HTTP proxyを分けて確認し、認証情報を
+共有ログやレポートへ含めないでください。
+
 ## 強制終了後に設定が残った
 
 ```bash
@@ -37,7 +72,7 @@ npx playwright install chromium
 
 ## systemdがない
 
-測定は利用できますが、v3.1.0の永続化機能はsystemd環境を必要とします。`benchmark`だけ使用してください。
+測定は利用できますが、v3.2.0の永続化機能はsystemd環境を必要とします。`benchmark`だけ使用してください。
 
 ## TCPバッファ探索がスキップされる
 
